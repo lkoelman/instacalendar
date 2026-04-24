@@ -46,11 +46,16 @@ class QuestionaryPrompt:
         return bool(answer)
 
 
+class RichProgress:
+    def status(self, message: str):
+        return console.status(message, spinner="dots")
+
+
 @app.callback(invoke_without_command=True)
 def main(ctx: typer.Context) -> None:
     if ctx.invoked_subcommand is None:
         console.print("Instacalendar guided wizard")
-        runner = AppRunner(_paths(), QuestionaryPrompt())
+        runner = AppRunner(_paths(), QuestionaryPrompt(), progress=RichProgress())
         config = runner.configure()
         summary = runner.run(destination=config.default_export)
         console.print(
@@ -71,7 +76,7 @@ def auth(
 ) -> None:
     if default_export not in {"ics", "google"}:
         raise typer.BadParameter("default export must be 'ics' or 'google'")
-    AppRunner(_paths(), QuestionaryPrompt()).configure(
+    AppRunner(_paths(), QuestionaryPrompt(), progress=RichProgress()).configure(
         instagram_username=instagram_username,
         instagram_password=instagram_password,
         openrouter_api_key=openrouter_api_key,
@@ -90,7 +95,7 @@ def run(
         Path | None, typer.Option(help="Path for .ics export when using file export")
     ] = None,
 ) -> None:
-    summary = AppRunner(_paths(), QuestionaryPrompt()).run(
+    summary = AppRunner(_paths(), QuestionaryPrompt(), progress=RichProgress()).run(
         collection=collection,
         ics_output=ics_output,
     )

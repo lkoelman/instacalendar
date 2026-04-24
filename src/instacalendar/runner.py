@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -24,6 +25,15 @@ class Prompt(Protocol):
     def confirm(self, message: str, *, default: bool = True) -> bool: ...
 
 
+class Progress(Protocol):
+    def status(self, message: str) -> AbstractContextManager[object]: ...
+
+
+class NullProgress:
+    def status(self, message: str) -> AbstractContextManager[object]:
+        return nullcontext()
+
+
 @dataclass(frozen=True)
 class RunSummary:
     processed_posts: int
@@ -33,9 +43,12 @@ class RunSummary:
 
 
 class AppRunner:
-    def __init__(self, paths: AppPaths, prompt: Prompt) -> None:
+    def __init__(
+        self, paths: AppPaths, prompt: Prompt, *, progress: Progress | None = None
+    ) -> None:
         self.paths = paths
         self.prompt = prompt
+        self.progress = progress or NullProgress()
         self.config_store = ConfigStore(paths)
         self.secret_store = SecretStore(paths.secret_fallback_file)
         self.cache = Cache(paths.cache_file)
@@ -84,8 +97,10 @@ class AppRunner:
         ics_output: Path | None = None,
         google_service: object | None = None,
     ) -> RunSummary:
-        self.cache.initialize()
-        config = self.config_store.load()
+        with self.progress.status("Initializing cache ..."):
+            self.cache.initialize()
+        with self.progress.status("Loading configuration ..."):
+            config = self.config_store.load()
         self._require_config(config)
         username = config.instagram_username or ""
         password = self.secret_store.get("instagram_password")
@@ -98,11 +113,14 @@ class AppRunner:
             self.secret_store.set("openrouter_api_key", api_key)
 
         instagram = LiveInstagramClient(username, password, self.paths.instagram_session_file)
-        instagram.authenticate()
+        with self.progress.status("Authenticating with Instagram ..."):
+            instagram.authenticate()
         if collection is None:
-            collections = instagram.list_collections()
+            with self.progress.status("Fetching collections ..."):
+                collections = instagram.list_collections()
             collection = self.prompt.choose("Instagram saved collection", collections)
-        posts = instagram.fetch_collection_posts(collection)
+        with self.progress.status(f"Fetching posts from {collection} ..."):
+            posts = instagram.fetch_collection_posts(collection)
 
         extractor = OpenRouterExtractor(
             api_key=api_key or "",
@@ -110,8 +128,11 @@ class AppRunner:
             vision_model=config.openrouter_vision_model or "",
         )
         approved: list[tuple[str, EventDraft, str, int]] = []
-        for post in posts:
-            result = extractor.extract(post)
+        for post_number, post in enumerate(posts, start=1):
+            with self.progress.status(
+                f"Extracting event data from post {post_number}/{len(posts)} ..."
+            ):
+                result = extractor.extract(post)
             for index, draft in enumerate(result.events):
                 uid = self.cache.stable_uid(
                     post.media_pk,
@@ -135,7 +156,8 @@ class AppRunner:
         exported_count = 0
         if export_destination == "ics":
             output = ics_output or Path(self.prompt.text("ICS output path", default="events.ics"))
-            IcsExporter().export(output, [(uid, draft) for uid, draft, _, _ in approved])
+            with self.progress.status("Exporting approved events to ICS ..."):
+                IcsExporter().export(output, [(uid, draft) for uid, draft, _, _ in approved])
             for uid, _draft, media_pk, index in approved:
                 self.cache.record_export(
                     uid=uid,
@@ -150,13 +172,17 @@ class AppRunner:
             destination_label = str(output)
         else:
             if google_service is None:
-                from instacalendar.google_auth import build_google_calendar_service
+                with self.progress.status("Authenticating with Google Calendar ..."):
+                    from instacalendar.google_auth import build_google_calendar_service
 
-                google_service = build_google_calendar_service(self.paths)
+                    google_service = build_google_calendar_service(self.paths)
             calendar_id = config.google_calendar_id or "primary"
             exporter = GoogleCalendarExporter(google_service)
-            for uid, draft, media_pk, index in approved:
-                remote_id = exporter.insert_if_missing(calendar_id, uid, draft)
+            for event_number, (uid, draft, media_pk, index) in enumerate(approved, start=1):
+                with self.progress.status(
+                    f"Exporting event {event_number}/{len(approved)} to Google Calendar ..."
+                ):
+                    remote_id = exporter.insert_if_missing(calendar_id, uid, draft)
                 self.cache.record_export(
                     uid=uid,
                     media_pk=media_pk,
