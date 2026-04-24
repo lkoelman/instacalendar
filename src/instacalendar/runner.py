@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -71,7 +72,7 @@ class AppRunner:
         )
         self.secret_store.set(
             "openrouter_api_key",
-            openrouter_api_key or self.prompt.text("OpenRouter API key", password=True),
+            self._resolve_openrouter_api_key(openrouter_api_key),
         )
         return config
 
@@ -93,7 +94,7 @@ class AppRunner:
             password = self.prompt.text("Instagram password", password=True)
             self.secret_store.set("instagram_password", password)
         if not api_key:
-            api_key = self.prompt.text("OpenRouter API key", password=True)
+            api_key = self._resolve_openrouter_api_key(None)
             self.secret_store.set("openrouter_api_key", api_key)
 
         instagram = LiveInstagramClient(username, password, self.paths.instagram_session_file)
@@ -183,6 +184,16 @@ class AppRunner:
             f"Confidence: {draft.confidence if draft.confidence is not None else 'unknown'}",
         ]
         return draft.is_exportable and self.prompt.confirm("\n".join(lines), default=True)
+
+    def _resolve_openrouter_api_key(self, explicit_api_key: str | None) -> str:
+        if explicit_api_key:
+            return explicit_api_key
+        environment_api_key = os.environ.get("OPENROUTER_API_KEY")
+        if environment_api_key and self.prompt.confirm(
+            "Use OPENROUTER_API_KEY from your environment?", default=True
+        ):
+            return environment_api_key
+        return self.prompt.text("OpenRouter API key", password=True)
 
     def _require_config(self, config: AppConfig) -> None:
         missing = []

@@ -39,6 +39,9 @@ uv run instacalendar auth \
   --default-export ics
 ```
 
+If `OPENROUTER_API_KEY` is set in your environment, setup asks whether to use
+that key before prompting you to type one.
+
 Secrets are stored in the operating system keyring when available, with a local
 fallback under the app config directory. Instagram session settings are stored
 under the app data directory to avoid repeated logins.
