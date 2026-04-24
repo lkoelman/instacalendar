@@ -1,0 +1,28 @@
+name: Windows Executable
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: uv sync --dev
+      - name: Build executable
+        run: uv run pyinstaller --onefile --name instacalendar src/instacalendar/cli.py
+      - name: Upload executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: instacalendar-windows
+          path: dist/instacalendar.exe
