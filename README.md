@@ -1,11 +1,12 @@
 # instacalendar
 
+> Scenario: you're like me and save lots of gigs, events in Instagram and then forget about them. You're a busy person so it's hard to keep track of all those fun events without aligning them with your boring, grown-up calendar. Meet InstaCalendar: seamlessly sync an entire Instragram saved post collection to your Google (or other) calendar. Keep track of those events, plan better, go out and explore!
+
 `instacalendar` is a command-line wizard that reads an Instagram saved posts
 collection, asks OpenRouter models to infer calendar events, lets you review
 each candidate event, and exports approved events to `.ics` or Google Calendar.
 
-The app targets Python 3.12 and is intended to be packaged as a Windows
-executable with PyInstaller.
+The app can be installed as Python package or as a Windows executable bundled with PyInstaller.
 
 ## Install For Development
 
