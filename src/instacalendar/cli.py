@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -20,6 +20,13 @@ console = Console()
 
 def _paths() -> AppPaths:
     return AppPaths.default()
+
+
+def _parse_date(value: str) -> date:
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date()
+    except ValueError as error:
+        raise typer.BadParameter("date must use YYYY-MM-DD format") from error
 
 
 class QuestionaryPrompt:
@@ -52,12 +59,29 @@ class RichProgress:
 
 
 @app.callback(invoke_without_command=True)
-def main(ctx: typer.Context) -> None:
+def main(
+    ctx: typer.Context,
+    posted_since: Annotated[
+        date | None,
+        typer.Option(
+            parser=_parse_date,
+            help="Only process posts published on or after this date",
+        ),
+    ] = None,
+    limit: Annotated[
+        int | None,
+        typer.Option(min=1, help="Maximum number of posts to process after filtering"),
+    ] = None,
+) -> None:
     if ctx.invoked_subcommand is None:
         console.print("Instacalendar guided wizard")
         runner = AppRunner(_paths(), QuestionaryPrompt(), progress=RichProgress())
         config = runner.configure()
-        summary = runner.run(destination=config.default_export)
+        summary = runner.run(
+            destination=config.default_export,
+            posted_since=posted_since,
+            limit=limit,
+        )
         console.print(
             f"Exported {summary.exported_events} events from {summary.processed_posts} posts "
             f"to {summary.destination}"
@@ -94,10 +118,23 @@ def run(
     ics_output: Annotated[
         Path | None, typer.Option(help="Path for .ics export when using file export")
     ] = None,
+    posted_since: Annotated[
+        date | None,
+        typer.Option(
+            parser=_parse_date,
+            help="Only process posts published on or after this date",
+        ),
+    ] = None,
+    limit: Annotated[
+        int | None,
+        typer.Option(min=1, help="Maximum number of posts to process after filtering"),
+    ] = None,
 ) -> None:
     summary = AppRunner(_paths(), QuestionaryPrompt(), progress=RichProgress()).run(
         collection=collection,
         ics_output=ics_output,
+        posted_since=posted_since,
+        limit=limit,
     )
     console.print(
         f"Exported {summary.exported_events} events from {summary.processed_posts} posts "

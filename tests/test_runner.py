@@ -1,3 +1,4 @@
+from datetime import UTC, date, datetime
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -146,3 +147,125 @@ def test_run_reports_progress_for_instagram_extraction_and_export(
         "Extracting event data from post 1/1 ...",
         "Exporting approved events to ICS ...",
     ]
+
+
+def test_run_filters_posts_by_posted_since(tmp_path: Path, monkeypatch) -> None:
+    runner = AppRunner(AppPaths.from_base(tmp_path), FakePrompt(confirm_answer=True))
+    runner.configure(
+        instagram_username="musicfan",
+        instagram_password="instagram-secret",
+        openrouter_api_key="openrouter-secret",
+        openrouter_text_model="text",
+        openrouter_vision_model="vision",
+    )
+
+    class FakeInstagramClient:
+        def __init__(self, username: str, password: str, session_file: Path) -> None:
+            return None
+
+        def authenticate(self) -> None:
+            return None
+
+        def list_collections(self) -> list[str]:
+            return ["Concerts"]
+
+        def fetch_collection_posts(self, collection_name: str) -> list[InstagramPost]:
+            return [
+                InstagramPost(
+                    media_pk="old",
+                    taken_at=datetime(2026, 3, 31, 12, 0, tzinfo=UTC),
+                    media_kind="image",
+                ),
+                InstagramPost(
+                    media_pk="on-date",
+                    taken_at=datetime(2026, 4, 1, 0, 0, tzinfo=UTC),
+                    media_kind="image",
+                ),
+                InstagramPost(
+                    media_pk="later",
+                    taken_at=datetime(2026, 4, 2, 12, 0, tzinfo=UTC),
+                    media_kind="image",
+                ),
+                InstagramPost(media_pk="missing-date", media_kind="image"),
+            ]
+
+    fake_extractor = Mock()
+    fake_extractor.extract.return_value = ExtractionResult(status="not_event")
+    fake_exporter = Mock()
+    fake_exporter.export.return_value = []
+
+    monkeypatch.setattr("instacalendar.runner.LiveInstagramClient", FakeInstagramClient)
+    monkeypatch.setattr(
+        "instacalendar.runner.OpenRouterExtractor",
+        lambda **kwargs: fake_extractor,
+    )
+    monkeypatch.setattr("instacalendar.runner.IcsExporter", lambda: fake_exporter)
+
+    summary = runner.run(ics_output=tmp_path / "events.ics", posted_since=date(2026, 4, 1))
+
+    assert [call.args[0].media_pk for call in fake_extractor.extract.call_args_list] == [
+        "on-date",
+        "later",
+    ]
+    assert summary.processed_posts == 2
+
+
+def test_run_applies_limit_after_posted_since_filter(tmp_path: Path, monkeypatch) -> None:
+    runner = AppRunner(AppPaths.from_base(tmp_path), FakePrompt(confirm_answer=True))
+    runner.configure(
+        instagram_username="musicfan",
+        instagram_password="instagram-secret",
+        openrouter_api_key="openrouter-secret",
+        openrouter_text_model="text",
+        openrouter_vision_model="vision",
+    )
+
+    class FakeInstagramClient:
+        def __init__(self, username: str, password: str, session_file: Path) -> None:
+            return None
+
+        def authenticate(self) -> None:
+            return None
+
+        def list_collections(self) -> list[str]:
+            return ["Concerts"]
+
+        def fetch_collection_posts(self, collection_name: str) -> list[InstagramPost]:
+            return [
+                InstagramPost(
+                    media_pk="old",
+                    taken_at=datetime(2026, 3, 31, 12, 0, tzinfo=UTC),
+                    media_kind="image",
+                ),
+                InstagramPost(
+                    media_pk="first-match",
+                    taken_at=datetime(2026, 4, 1, 12, 0, tzinfo=UTC),
+                    media_kind="image",
+                ),
+                InstagramPost(
+                    media_pk="second-match",
+                    taken_at=datetime(2026, 4, 2, 12, 0, tzinfo=UTC),
+                    media_kind="image",
+                ),
+            ]
+
+    fake_extractor = Mock()
+    fake_extractor.extract.return_value = ExtractionResult(status="not_event")
+
+    monkeypatch.setattr("instacalendar.runner.LiveInstagramClient", FakeInstagramClient)
+    monkeypatch.setattr(
+        "instacalendar.runner.OpenRouterExtractor",
+        lambda **kwargs: fake_extractor,
+    )
+    monkeypatch.setattr("instacalendar.runner.IcsExporter", lambda: Mock(export=Mock()))
+
+    summary = runner.run(
+        ics_output=tmp_path / "events.ics",
+        posted_since=date(2026, 4, 1),
+        limit=1,
+    )
+
+    assert [call.args[0].media_pk for call in fake_extractor.extract.call_args_list] == [
+        "first-match"
+    ]
+    assert summary.processed_posts == 1

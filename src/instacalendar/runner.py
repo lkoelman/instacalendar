@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Protocol
 
@@ -96,6 +96,8 @@ class AppRunner:
         destination: str | None = None,
         ics_output: Path | None = None,
         google_service: object | None = None,
+        posted_since: date | None = None,
+        limit: int | None = None,
     ) -> RunSummary:
         with self.progress.status("Initializing cache ..."):
             self.cache.initialize()
@@ -121,6 +123,14 @@ class AppRunner:
             collection = self.prompt.choose("Instagram saved collection", collections)
         with self.progress.status(f"Fetching posts from {collection} ..."):
             posts = instagram.fetch_collection_posts(collection)
+        if posted_since is not None:
+            posts = [
+                post
+                for post in posts
+                if post.taken_at is not None and post.taken_at.date() >= posted_since
+            ]
+        if limit is not None:
+            posts = posts[:limit]
 
         extractor = OpenRouterExtractor(
             api_key=api_key or "",

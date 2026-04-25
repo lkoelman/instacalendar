@@ -72,6 +72,12 @@ Run a configured collection directly:
 uv run instacalendar run --collection "Concerts" --ics-output events.ics
 ```
 
+Limit processing to recent posts, or cap how many matching posts are reviewed:
+
+```bash
+uv run instacalendar run --collection "Concerts" --posted-since 2026-04-01 --limit 25
+```
+
 Inspect processed exports:
 
 ```bash
