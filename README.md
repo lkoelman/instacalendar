@@ -5,7 +5,7 @@
 <h1 align="center">Instacalendar</h1>
 
 
-> Scenario: you're like me and save lots of gigs, events in Instagram and then forget about them. You're a busy person so it's hard to keep track of all those fun events without aligning them with your boring, grown-up calendar. Meet Instacalendar: seamlessly sync an entire Instragram saved post collection to your Google (or other) calendar. Keep track of those events, plan better, go out and explore!
+> Scenario: you're like me and save lots of gigs and events in Instagram. Then you forget about them. Life's busy and it's hard to keep track of all those fun events without aligning them with your boring, grown-up calendar. Meet Instacalendar: seamlessly sync an entire Instragram saved post collection to your Google (or other) calendar. Keep track of those events, plan better, go out and explore!
 
 `instacalendar` is a command-line wizard that reads an Instagram saved posts
 collection, asks OpenRouter models to infer calendar events, lets you review
