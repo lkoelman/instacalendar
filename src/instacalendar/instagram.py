@@ -60,5 +60,6 @@ class LiveInstagramClient:
         return [name for name in names if name]
 
     def fetch_collection_posts(self, collection_name: str) -> list[InstagramPost]:
-        medias = self.client.collection_medias_by_name(collection_name, amount=0)
+        collection_pk = self.client.collection_pk_by_name(collection_name)
+        medias = self.client.collection_medias(collection_pk, amount=0)
         return [self.adapter.map_media(media) for media in medias]
