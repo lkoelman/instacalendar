@@ -1,19 +1,24 @@
 from __future__ import annotations
 
 import os
+import re
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
+from mimetypes import guess_extension, guess_type
 from pathlib import Path
 from typing import Protocol
+from urllib.parse import urlparse
 
-from instacalendar.cache import Cache
+import httpx
+
+from instacalendar.cache import Cache, CachedMedia
 from instacalendar.config import AppConfig, AppPaths, ConfigStore
 from instacalendar.exporters.google import GoogleCalendarExporter
 from instacalendar.exporters.ics import IcsExporter
 from instacalendar.extractors.openrouter import OpenRouterExtractor
 from instacalendar.instagram import LiveInstagramClient
-from instacalendar.models import EventDraft
+from instacalendar.models import EventDraft, ImageReference, InstagramPost, VideoReference
 from instacalendar.secrets import SecretStore
 
 
@@ -98,31 +103,42 @@ class AppRunner:
         google_service: object | None = None,
         posted_since: date | None = None,
         limit: int | None = None,
+        from_cache: bool = False,
     ) -> RunSummary:
         with self.progress.status("Initializing cache ..."):
             self.cache.initialize()
         with self.progress.status("Loading configuration ..."):
             config = self.config_store.load()
-        self._require_config(config)
+        self._require_config(config, require_instagram=not from_cache)
         username = config.instagram_username or ""
-        password = self.secret_store.get("instagram_password")
         api_key = self.secret_store.get("openrouter_api_key")
-        if not password:
-            password = self.prompt.text("Instagram password", password=True)
-            self.secret_store.set("instagram_password", password)
         if not api_key:
             api_key = self._resolve_openrouter_api_key(None)
             self.secret_store.set("openrouter_api_key", api_key)
 
-        instagram = LiveInstagramClient(username, password, self.paths.instagram_session_file)
-        with self.progress.status("Authenticating with Instagram ..."):
-            instagram.authenticate()
-        if collection is None:
-            with self.progress.status("Fetching collections ..."):
-                collections = instagram.list_collections()
-            collection = self.prompt.choose("Instagram saved collection", collections)
-        with self.progress.status(f"Fetching posts from {collection} ..."):
-            posts = instagram.fetch_collection_posts(collection)
+        if from_cache:
+            if collection is None:
+                collections = self.cache.list_cached_collections()
+                if not collections:
+                    raise RuntimeError("No cached posts found. Run without --from-cache first.")
+                collection = self.prompt.choose("Cached Instagram collection", collections)
+            posts = self.cache.load_cached_posts(collection)
+            if not posts:
+                raise RuntimeError(f"No cached posts found for collection {collection!r}.")
+        else:
+            password = self.secret_store.get("instagram_password")
+            if not password:
+                password = self.prompt.text("Instagram password", password=True)
+                self.secret_store.set("instagram_password", password)
+            instagram = LiveInstagramClient(username, password, self.paths.instagram_session_file)
+            with self.progress.status("Authenticating with Instagram ..."):
+                instagram.authenticate()
+            if collection is None:
+                with self.progress.status("Fetching collections ..."):
+                    collections = instagram.list_collections()
+                collection = self.prompt.choose("Instagram saved collection", collections)
+            with self.progress.status(f"Fetching posts from {collection} ..."):
+                posts = instagram.fetch_collection_posts(collection)
         if posted_since is not None:
             posts = [
                 post
@@ -131,6 +147,9 @@ class AppRunner:
             ]
         if limit is not None:
             posts = posts[:limit]
+        if not from_cache:
+            with self.progress.status(f"Caching posts from {collection} ..."):
+                posts = self._cache_posts(collection or "", posts)
 
         extractor = OpenRouterExtractor(
             api_key=api_key or "",
@@ -231,9 +250,117 @@ class AppRunner:
             return environment_api_key
         return self.prompt.text("OpenRouter API key", password=True)
 
-    def _require_config(self, config: AppConfig) -> None:
+    def _cache_posts(self, collection_name: str, posts: list[InstagramPost]) -> list[InstagramPost]:
+        cached_posts = []
+        fetched_at = datetime.now(UTC)
+        for post in posts:
+            media_records = self._download_post_media(collection_name, post)
+            cached_post = self._post_with_cached_media(post, media_records)
+            self.cache.upsert_cached_post(
+                collection_name=collection_name,
+                post=post,
+                fetched_at=fetched_at,
+                media=media_records,
+            )
+            cached_posts.append(cached_post)
+        return cached_posts
+
+    def _download_post_media(
+        self, collection_name: str, post: InstagramPost
+    ) -> list[CachedMedia]:
+        records: list[CachedMedia] = []
+        for kind, references in (("image", post.images), ("video", post.videos)):
+            for index, reference in enumerate(references):
+                source_url = reference.uri
+                try:
+                    local_path = self._download_media_file(
+                        collection_name=collection_name,
+                        media_pk=post.media_pk,
+                        media_kind=kind,
+                        media_index=index,
+                        source_url=source_url,
+                    )
+                except Exception as error:
+                    records.append(
+                        CachedMedia(
+                            collection_name=collection_name,
+                            media_pk=post.media_pk,
+                            media_kind=kind,
+                            media_index=index,
+                            source_url=source_url,
+                            local_path=None,
+                            status="failed",
+                            error=str(error),
+                        )
+                    )
+                else:
+                    records.append(
+                        CachedMedia(
+                            collection_name=collection_name,
+                            media_pk=post.media_pk,
+                            media_kind=kind,
+                            media_index=index,
+                            source_url=source_url,
+                            local_path=str(local_path),
+                            status="cached",
+                            error=None,
+                        )
+                    )
+        return records
+
+    def _download_media_file(
+        self,
+        *,
+        collection_name: str,
+        media_pk: str,
+        media_kind: str,
+        media_index: int,
+        source_url: str,
+    ) -> Path:
+        directory = self.paths.media_dir / self._slug(collection_name) / media_pk
+        directory.mkdir(parents=True, exist_ok=True)
+        extension = self._media_extension(source_url, media_kind)
+        path = directory / f"{media_kind}-{media_index}{extension}"
+        if path.exists():
+            return path
+        response = httpx.get(source_url, timeout=60, follow_redirects=True)
+        response.raise_for_status()
+        path.write_bytes(response.content)
+        return path
+
+    def _media_extension(self, source_url: str, media_kind: str) -> str:
+        parsed_path = Path(urlparse(source_url).path)
+        if parsed_path.suffix:
+            return parsed_path.suffix.split("?")[0]
+        if content_type := guess_type(source_url)[0]:
+            return guess_extension(content_type) or self._default_media_extension(media_kind)
+        return self._default_media_extension(media_kind)
+
+    def _default_media_extension(self, media_kind: str) -> str:
+        return ".mp4" if media_kind == "video" else ".jpg"
+
+    def _slug(self, value: str) -> str:
+        slug = re.sub(r"[^A-Za-z0-9._-]+", "-", value.strip()).strip("-")
+        return slug or "collection"
+
+    def _post_with_cached_media(
+        self, post: InstagramPost, media_records: list[CachedMedia]
+    ) -> InstagramPost:
+        images = [
+            ImageReference(uri=record.local_path or record.source_url)
+            for record in media_records
+            if record.media_kind == "image"
+        ]
+        videos = [
+            VideoReference(uri=record.local_path or record.source_url)
+            for record in media_records
+            if record.media_kind == "video"
+        ]
+        return post.model_copy(update={"images": images, "videos": videos})
+
+    def _require_config(self, config: AppConfig, *, require_instagram: bool = True) -> None:
         missing = []
-        if not config.instagram_username:
+        if require_instagram and not config.instagram_username:
             missing.append("instagram_username")
         if not config.openrouter_text_model:
             missing.append("openrouter_text_model")

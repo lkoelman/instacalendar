@@ -7,7 +7,7 @@ from typing import Any
 
 from instagrapi.exceptions import ClientError
 
-from instacalendar.models import ImageReference, InstagramPost
+from instacalendar.models import ImageReference, InstagramPost, VideoReference
 
 logger = logging.getLogger(__name__)
 
@@ -26,14 +26,21 @@ class InstagramAdapter:
         if taken_at is not None and taken_at.tzinfo is None:
             taken_at = taken_at.replace(tzinfo=UTC)
         images = []
+        videos = []
         thumbnail_url = getattr(media, "thumbnail_url", None)
         if thumbnail_url:
             images.append(ImageReference(uri=str(thumbnail_url)))
+        video_url = getattr(media, "video_url", None)
+        if video_url:
+            videos.append(VideoReference(uri=str(video_url)))
         resources = getattr(media, "resources", None) or []
         for resource in resources:
             url = getattr(resource, "thumbnail_url", None)
             if url:
                 images.append(ImageReference(uri=str(url)))
+            video_url = getattr(resource, "video_url", None)
+            if video_url:
+                videos.append(VideoReference(uri=str(video_url)))
         location = getattr(media, "location", None)
         return InstagramPost(
             media_pk=str(media.pk),
@@ -44,6 +51,7 @@ class InstagramAdapter:
             location_name=getattr(location, "name", None) if location else None,
             location_address=getattr(location, "address", None) if location else None,
             images=images,
+            videos=videos,
         )
 
 

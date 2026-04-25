@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+
+from instacalendar.models import ImageReference, InstagramPost, VideoReference
 
 
 @dataclass(frozen=True)
@@ -16,6 +19,32 @@ class CachedExport:
     destination_id: str
     remote_event_id: str | None
     exported_at: str
+
+
+@dataclass(frozen=True)
+class CachedMedia:
+    collection_name: str
+    media_pk: str
+    media_kind: str
+    media_index: int
+    source_url: str
+    local_path: str | None
+    status: str
+    error: str | None
+
+
+@dataclass(frozen=True)
+class CachedPostSummary:
+    collection_name: str
+    media_pk: str
+    shortcode: str | None
+    taken_at: str | None
+    media_kind: str
+    fetched_at: str
+    cached_images: int
+    cached_videos: int
+    missing_media: int
+    caption_preview: str
 
 
 class Cache:
@@ -48,6 +77,35 @@ class Cache:
                     remote_event_id TEXT,
                     exported_at TEXT NOT NULL,
                     PRIMARY KEY (uid, destination_kind, destination_id)
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS cached_posts (
+                    collection_name TEXT NOT NULL,
+                    media_pk TEXT NOT NULL,
+                    post_json TEXT NOT NULL,
+                    fetched_at TEXT NOT NULL,
+                    PRIMARY KEY (collection_name, media_pk)
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS cached_media (
+                    collection_name TEXT NOT NULL,
+                    media_pk TEXT NOT NULL,
+                    media_kind TEXT NOT NULL,
+                    media_index INTEGER NOT NULL,
+                    source_url TEXT NOT NULL,
+                    local_path TEXT,
+                    status TEXT NOT NULL,
+                    error TEXT,
+                    PRIMARY KEY (collection_name, media_pk, media_kind, media_index),
+                    FOREIGN KEY (collection_name, media_pk)
+                        REFERENCES cached_posts(collection_name, media_pk)
+                        ON DELETE CASCADE
                 )
                 """
             )
@@ -127,5 +185,168 @@ class Cache:
             ).fetchall()
         return [CachedExport(*row) for row in rows]
 
+    def upsert_cached_post(
+        self,
+        *,
+        collection_name: str,
+        post: InstagramPost,
+        fetched_at: datetime,
+        media: list[CachedMedia],
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO cached_posts (collection_name, media_pk, post_json, fetched_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(collection_name, media_pk) DO UPDATE SET
+                    post_json = excluded.post_json,
+                    fetched_at = excluded.fetched_at
+                """,
+                (
+                    collection_name,
+                    post.media_pk,
+                    post.model_dump_json(),
+                    fetched_at.isoformat(),
+                ),
+            )
+            conn.execute(
+                """
+                DELETE FROM cached_media
+                WHERE collection_name = ? AND media_pk = ?
+                """,
+                (collection_name, post.media_pk),
+            )
+            conn.executemany(
+                """
+                INSERT INTO cached_media (
+                    collection_name, media_pk, media_kind, media_index, source_url,
+                    local_path, status, error
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        item.collection_name,
+                        item.media_pk,
+                        item.media_kind,
+                        item.media_index,
+                        item.source_url,
+                        item.local_path,
+                        item.status,
+                        item.error,
+                    )
+                    for item in media
+                ],
+            )
+
+    def list_cached_collections(self) -> list[str]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT collection_name FROM cached_posts ORDER BY collection_name"
+            ).fetchall()
+        return [row[0] for row in rows]
+
+    def load_cached_posts(self, collection_name: str) -> list[InstagramPost]:
+        with self._connect() as conn:
+            post_rows = conn.execute(
+                """
+                SELECT media_pk, post_json
+                FROM cached_posts
+                WHERE collection_name = ?
+                ORDER BY rowid
+                """,
+                (collection_name,),
+            ).fetchall()
+            media_rows = conn.execute(
+                """
+                SELECT media_pk, media_kind, media_index, source_url, local_path, status
+                FROM cached_media
+                WHERE collection_name = ?
+                ORDER BY media_pk, media_kind, media_index
+                """,
+                (collection_name,),
+            ).fetchall()
+        media_by_post: dict[str, list[tuple[str, int, str, str | None, str]]] = {}
+        for media_pk, media_kind, media_index, source_url, local_path, status in media_rows:
+            media_by_post.setdefault(media_pk, []).append(
+                (media_kind, media_index, source_url, local_path, status)
+            )
+
+        posts = []
+        for media_pk, post_json in post_rows:
+            post = InstagramPost.model_validate_json(post_json)
+            images: list[ImageReference] = []
+            videos: list[VideoReference] = []
+            for media_kind, _index, source_url, local_path, status in media_by_post.get(
+                media_pk, []
+            ):
+                uri = local_path if status == "cached" and local_path else source_url
+                if media_kind == "image":
+                    images.append(ImageReference(uri=uri))
+                elif media_kind == "video":
+                    videos.append(VideoReference(uri=uri))
+            posts.append(post.model_copy(update={"images": images, "videos": videos}))
+        return posts
+
+    def list_cached_posts(self, collection_name: str | None = None) -> list[CachedPostSummary]:
+        params: tuple[str, ...] = ()
+        where = ""
+        if collection_name is not None:
+            where = "WHERE p.collection_name = ?"
+            params = (collection_name,)
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT
+                    p.collection_name,
+                    p.media_pk,
+                    p.post_json,
+                    p.fetched_at,
+                    SUM(CASE WHEN m.media_kind = 'image' AND m.status = 'cached'
+                        THEN 1 ELSE 0 END) AS cached_images,
+                    SUM(CASE WHEN m.media_kind = 'video' AND m.status = 'cached'
+                        THEN 1 ELSE 0 END) AS cached_videos,
+                    SUM(CASE WHEN m.status != 'cached'
+                        THEN 1 ELSE 0 END) AS missing_media
+                FROM cached_posts p
+                LEFT JOIN cached_media m
+                    ON p.collection_name = m.collection_name
+                    AND p.media_pk = m.media_pk
+                {where}
+                GROUP BY p.collection_name, p.media_pk, p.post_json, p.fetched_at
+                ORDER BY p.fetched_at DESC, p.collection_name, p.media_pk
+                """,
+                params,
+            ).fetchall()
+        summaries = []
+        for (
+            row_collection_name,
+            media_pk,
+            post_json,
+            fetched_at,
+            cached_images,
+            cached_videos,
+            missing_media,
+        ) in rows:
+            data = json.loads(post_json)
+            caption = data.get("caption") or ""
+            summaries.append(
+                CachedPostSummary(
+                    collection_name=row_collection_name,
+                    media_pk=media_pk,
+                    shortcode=data.get("shortcode"),
+                    taken_at=data.get("taken_at"),
+                    media_kind=data.get("media_kind") or "",
+                    fetched_at=fetched_at,
+                    cached_images=int(cached_images or 0),
+                    cached_videos=int(cached_videos or 0),
+                    missing_media=int(missing_media or 0),
+                    caption_preview=caption[:80],
+                )
+            )
+        return summaries
+
     def _connect(self) -> sqlite3.Connection:
-        return sqlite3.connect(self.path)
+        conn = sqlite3.connect(self.path)
+        conn.execute("PRAGMA foreign_keys = ON")
+        return conn

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import mimetypes
+from base64 import b64encode
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -86,8 +89,15 @@ class OpenRouterExtractor:
             return prompt
         content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
         for image in post.images:
-            content.append({"type": "image_url", "image_url": {"url": image.uri}})
+            content.append({"type": "image_url", "image_url": {"url": self._image_url(image.uri)}})
         return content
+
+    def _image_url(self, uri: str) -> str:
+        path = Path(uri)
+        if not path.exists():
+            return uri
+        mime_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        return f"data:{mime_type};base64,{b64encode(path.read_bytes()).decode()}"
 
     def _parse_result(self, content: str, model: str) -> ExtractionResult:
         data = json.loads(content)

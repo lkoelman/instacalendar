@@ -72,16 +72,23 @@ Run a configured collection directly:
 uv run instacalendar run --collection "Concerts" --ics-output events.ics
 ```
 
+Retry extraction/export from posts already saved in the local cache:
+
+```bash
+uv run instacalendar run --from-cache --collection "Concerts" --ics-output events.ics
+```
+
 Limit processing to recent posts, or cap how many matching posts are reviewed:
 
 ```bash
 uv run instacalendar run --collection "Concerts" --posted-since 2026-04-01 --limit 25
 ```
 
-Inspect processed exports:
+Inspect cached posts and processed exports:
 
 ```bash
-uv run instacalendar cache list
+uv run instacalendar cache list-posts
+uv run instacalendar cache list-events
 ```
 
 Clear the local cache:
@@ -92,10 +99,11 @@ uv run instacalendar cache clear --yes
 
 ## Privacy
 
-Instagram captions, post metadata, and image URLs for posts being processed are
-sent to OpenRouter for extraction. Google Calendar export sends approved event
-details to Google. The local SQLite cache stores post IDs, review decisions, and
-export records so reruns do not create duplicates.
+Instagram captions, post metadata, and image content for posts being processed
+are sent to OpenRouter for extraction. Google Calendar export sends approved
+event details to Google. The local cache stores post metadata, downloaded image
+and video files, review decisions, and export records so reruns can retry
+extraction without contacting Instagram and avoid duplicate exports.
 
 ## Test And Lint
 

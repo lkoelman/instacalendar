@@ -42,6 +42,43 @@ def test_instagram_adapter_maps_media_object_to_post_contract() -> None:
     assert post.images[0].uri == "https://cdn.example/post.jpg"
 
 
+def test_instagram_adapter_maps_video_and_carousel_resources() -> None:
+    media = SimpleNamespace(
+        pk=123,
+        code="abc",
+        caption_text="May 3 at The Room",
+        taken_at=datetime(2026, 4, 1, 12, 0),
+        media_type=8,
+        thumbnail_url="https://cdn.example/post.jpg",
+        video_url="https://cdn.example/post.mp4",
+        resources=[
+            SimpleNamespace(
+                thumbnail_url="https://cdn.example/slide.jpg",
+                video_url=None,
+                media_type=1,
+            ),
+            SimpleNamespace(
+                thumbnail_url="https://cdn.example/video-thumb.jpg",
+                video_url="https://cdn.example/slide.mp4",
+                media_type=2,
+            ),
+        ],
+        location=None,
+    )
+
+    post = InstagramAdapter(client=None).map_media(media)
+
+    assert [image.uri for image in post.images] == [
+        "https://cdn.example/post.jpg",
+        "https://cdn.example/slide.jpg",
+        "https://cdn.example/video-thumb.jpg",
+    ]
+    assert [video.uri for video in post.videos] == [
+        "https://cdn.example/post.mp4",
+        "https://cdn.example/slide.mp4",
+    ]
+
+
 def test_live_instagram_client_fetches_all_collection_posts_by_collection_pk() -> None:
     class FakeClient:
         def __init__(self) -> None:

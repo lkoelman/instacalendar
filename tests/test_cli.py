@@ -10,10 +10,49 @@ from instacalendar.runner import RunSummary
 
 def test_cli_cache_list_initializes_empty_cache(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("INSTACALENDAR_HOME", str(tmp_path))
-    result = CliRunner().invoke(app, ["cache", "list"])
+    result = CliRunner().invoke(app, ["cache", "list-events"])
 
     assert result.exit_code == 0
     assert "No exports recorded" in result.stdout
+
+
+def test_cli_cache_list_command_is_removed(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("INSTACALENDAR_HOME", str(tmp_path))
+    result = CliRunner().invoke(app, ["cache", "list"])
+
+    assert result.exit_code != 0
+
+
+def test_cli_cache_list_posts_shows_cached_posts(tmp_path: Path, monkeypatch) -> None:
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from instacalendar.cache import Cache
+    from instacalendar.config import AppPaths
+    from instacalendar.models import InstagramPost
+
+    monkeypatch.setenv("INSTACALENDAR_HOME", str(tmp_path))
+    cache = Cache(AppPaths.from_base(tmp_path).cache_file)
+    cache.initialize()
+    cache.upsert_cached_post(
+        collection_name="Concerts",
+        post=InstagramPost(
+            media_pk="1",
+            shortcode="abc",
+            caption="May 3 at The Room with a long lineup",
+            taken_at=datetime(2026, 4, 1, 12, 0, tzinfo=ZoneInfo("UTC")),
+            media_kind="1",
+        ),
+        fetched_at=datetime(2026, 4, 2, 12, 0, tzinfo=ZoneInfo("UTC")),
+        media=[],
+    )
+
+    result = CliRunner().invoke(app, ["cache", "list-posts"])
+
+    assert result.exit_code == 0
+    assert "Collection" in result.stdout
+    assert "Concerts" in result.stdout
+    assert "abc" in result.stdout
 
 
 def test_cli_auth_writes_config(tmp_path: Path, monkeypatch) -> None:
@@ -67,6 +106,31 @@ def test_cli_run_passes_post_filters_to_runner(monkeypatch) -> None:
     assert result.exit_code == 0
     assert calls[0]["posted_since"] == date(2026, 4, 1)
     assert calls[0]["limit"] == 3
+
+
+def test_cli_run_passes_from_cache_to_runner(monkeypatch) -> None:
+    calls = []
+
+    class FakeAppRunner:
+        def __init__(self, *args, **kwargs) -> None:
+            return None
+
+        def run(self, **kwargs) -> RunSummary:
+            calls.append(kwargs)
+            return RunSummary(
+                processed_posts=1,
+                approved_events=0,
+                exported_events=0,
+                destination="events.ics",
+            )
+
+    monkeypatch.setattr("instacalendar.cli.AppRunner", FakeAppRunner)
+
+    result = CliRunner().invoke(app, ["run", "--from-cache", "--collection", "Concerts"])
+
+    assert result.exit_code == 0
+    assert calls[0]["from_cache"] is True
+    assert calls[0]["collection"] == "Concerts"
 
 
 def test_cli_default_command_passes_post_filters_to_runner(monkeypatch) -> None:

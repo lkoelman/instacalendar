@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Annotated
@@ -7,6 +8,7 @@ from typing import Annotated
 import questionary
 import typer
 from rich.console import Console
+from rich.table import Table
 
 from instacalendar.cache import Cache
 from instacalendar.config import AppPaths
@@ -15,7 +17,7 @@ from instacalendar.runner import AppRunner
 app = typer.Typer(help="Turn Instagram saved event posts into calendar events.")
 cache_app = typer.Typer(help="Inspect or clear local processing records.")
 app.add_typer(cache_app, name="cache")
-console = Console()
+console = Console(width=180)
 
 
 def _paths() -> AppPaths:
@@ -129,12 +131,17 @@ def run(
         int | None,
         typer.Option(min=1, help="Maximum number of posts to process after filtering"),
     ] = None,
+    from_cache: Annotated[
+        bool,
+        typer.Option("--from-cache", help="Use cached posts instead of fetching Instagram"),
+    ] = False,
 ) -> None:
     summary = AppRunner(_paths(), QuestionaryPrompt(), progress=RichProgress()).run(
         collection=collection,
         ics_output=ics_output,
         posted_since=posted_since,
         limit=limit,
+        from_cache=from_cache,
     )
     console.print(
         f"Exported {summary.exported_events} events from {summary.processed_posts} posts "
@@ -142,8 +149,8 @@ def run(
     )
 
 
-@cache_app.command("list")
-def cache_list() -> None:
+@cache_app.command("list-events")
+def cache_list_events() -> None:
     cache = Cache(_paths().cache_file)
     cache.initialize()
     exports = cache.list_exports()
@@ -156,6 +163,45 @@ def cache_list() -> None:
         )
 
 
+@cache_app.command("list-posts")
+def cache_list_posts(
+    collection: Annotated[
+        str | None, typer.Option(help="Only show cached posts from this collection")
+    ] = None,
+) -> None:
+    cache = Cache(_paths().cache_file)
+    cache.initialize()
+    posts = cache.list_cached_posts(collection)
+    if not posts:
+        console.print("No cached posts recorded")
+        return
+    table = Table()
+    table.add_column("Fetched")
+    table.add_column("Collection")
+    table.add_column("Posted")
+    table.add_column("Media PK")
+    table.add_column("Shortcode")
+    table.add_column("Kind")
+    table.add_column("Images", justify="right")
+    table.add_column("Videos", justify="right")
+    table.add_column("Missing", justify="right")
+    table.add_column("Caption")
+    for post in posts:
+        table.add_row(
+            post.fetched_at,
+            post.collection_name,
+            post.taken_at or "",
+            post.media_pk,
+            post.shortcode or "",
+            post.media_kind,
+            str(post.cached_images),
+            str(post.cached_videos),
+            str(post.missing_media),
+            post.caption_preview,
+        )
+    console.print(table)
+
+
 @cache_app.command("clear")
 def cache_clear(
     yes: Annotated[bool, typer.Option("--yes", help="Confirm cache deletion")] = False,
@@ -165,5 +211,7 @@ def cache_clear(
         raise typer.Abort()
     if path.exists():
         path.unlink()
+    if _paths().media_dir.exists():
+        shutil.rmtree(_paths().media_dir)
     Cache(path).initialize()
     console.print(f"Cleared cache at {datetime.now(UTC).isoformat()}")

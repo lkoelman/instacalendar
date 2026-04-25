@@ -3,7 +3,13 @@ from pathlib import Path
 from unittest.mock import Mock
 
 from instacalendar.config import AppPaths
-from instacalendar.models import ExtractionResult, InstagramPost
+from instacalendar.models import (
+    EventDraft,
+    ExtractionResult,
+    ImageReference,
+    InstagramPost,
+    VideoReference,
+)
 from instacalendar.runner import AppRunner
 
 
@@ -144,9 +150,12 @@ def test_run_reports_progress_for_instagram_extraction_and_export(
         "Authenticating with Instagram ...",
         "Fetching collections ...",
         "Fetching posts from Concerts ...",
+        "Caching posts from Concerts ...",
         "Extracting event data from post 1/1 ...",
         "Exporting approved events to ICS ...",
     ]
+
+    assert runner.cache.load_cached_posts("Concerts")[0].media_pk == "1"
 
 
 def test_run_filters_posts_by_posted_since(tmp_path: Path, monkeypatch) -> None:
@@ -207,7 +216,77 @@ def test_run_filters_posts_by_posted_since(tmp_path: Path, monkeypatch) -> None:
         "on-date",
         "later",
     ]
+    assert [post.media_pk for post in runner.cache.load_cached_posts("Concerts")] == [
+        "on-date",
+        "later",
+    ]
     assert summary.processed_posts == 2
+
+
+def test_run_caches_successful_media_and_keeps_post_when_media_download_fails(
+    tmp_path: Path, monkeypatch
+) -> None:
+    runner = AppRunner(AppPaths.from_base(tmp_path), FakePrompt(confirm_answer=True))
+    runner.configure(
+        instagram_username="musicfan",
+        instagram_password="instagram-secret",
+        openrouter_api_key="openrouter-secret",
+        openrouter_text_model="text",
+        openrouter_vision_model="vision",
+    )
+
+    class FakeInstagramClient:
+        def __init__(self, username: str, password: str, session_file: Path) -> None:
+            return None
+
+        def authenticate(self) -> None:
+            return None
+
+        def list_collections(self) -> list[str]:
+            return ["Concerts"]
+
+        def fetch_collection_posts(self, collection_name: str) -> list[InstagramPost]:
+            return [
+                InstagramPost(
+                    media_pk="1",
+                    shortcode="abc",
+                    caption="Live Set",
+                    media_kind="image",
+                    images=[ImageReference(uri="https://cdn.example/post.jpg")],
+                    videos=[VideoReference(uri="https://cdn.example/post.mp4")],
+                )
+            ]
+
+    class FakeResponse:
+        content = b"image bytes"
+
+        def raise_for_status(self) -> None:
+            return None
+
+    def fake_get(url: str, **kwargs):
+        if url.endswith(".mp4"):
+            raise RuntimeError("video failed")
+        return FakeResponse()
+
+    fake_extractor = Mock()
+    fake_extractor.extract.return_value = ExtractionResult(status="not_event")
+    monkeypatch.setattr("instacalendar.runner.LiveInstagramClient", FakeInstagramClient)
+    monkeypatch.setattr("instacalendar.runner.httpx.get", fake_get)
+    monkeypatch.setattr(
+        "instacalendar.runner.OpenRouterExtractor",
+        lambda **kwargs: fake_extractor,
+    )
+    monkeypatch.setattr("instacalendar.runner.IcsExporter", lambda: Mock(export=Mock()))
+
+    runner.run(ics_output=tmp_path / "events.ics")
+
+    cached_post = runner.cache.load_cached_posts("Concerts")[0]
+    assert Path(cached_post.images[0].uri).exists()
+    assert cached_post.videos[0].uri == "https://cdn.example/post.mp4"
+    summary = runner.cache.list_cached_posts()[0]
+    assert summary.cached_images == 1
+    assert summary.cached_videos == 0
+    assert summary.missing_media == 1
 
 
 def test_run_applies_limit_after_posted_since_filter(tmp_path: Path, monkeypatch) -> None:
@@ -268,4 +347,116 @@ def test_run_applies_limit_after_posted_since_filter(tmp_path: Path, monkeypatch
     assert [call.args[0].media_pk for call in fake_extractor.extract.call_args_list] == [
         "first-match"
     ]
+    assert [post.media_pk for post in runner.cache.load_cached_posts("Concerts")] == [
+        "first-match"
+    ]
     assert summary.processed_posts == 1
+
+
+def test_run_from_cache_bypasses_instagram_and_extracts_cached_posts(
+    tmp_path: Path, monkeypatch
+) -> None:
+    runner = AppRunner(AppPaths.from_base(tmp_path), FakePrompt(confirm_answer=True))
+    runner.configure(
+        instagram_username="musicfan",
+        instagram_password="instagram-secret",
+        openrouter_api_key="openrouter-secret",
+        openrouter_text_model="text",
+        openrouter_vision_model="vision",
+    )
+    runner.cache.initialize()
+    runner.cache.upsert_cached_post(
+        collection_name="Concerts",
+        post=InstagramPost(
+            media_pk="1",
+            shortcode="abc",
+            caption="Live Set May 3",
+            media_kind="image",
+            images=[ImageReference(uri=str(tmp_path / "poster.jpg"))],
+        ),
+        fetched_at=datetime(2026, 4, 2, 12, 0, tzinfo=UTC),
+        media=[],
+    )
+
+    class FailingInstagramClient:
+        def __init__(self, *args, **kwargs) -> None:
+            raise AssertionError("Instagram should not be used")
+
+    fake_extractor = Mock()
+    fake_extractor.extract.return_value = ExtractionResult(
+        status="event",
+        events=[
+            EventDraft(
+                title="Live Set",
+                start=datetime(2026, 5, 3, 20, 0, tzinfo=UTC),
+            )
+        ],
+    )
+    fake_exporter = Mock()
+    fake_exporter.export.return_value = []
+
+    monkeypatch.setattr("instacalendar.runner.LiveInstagramClient", FailingInstagramClient)
+    monkeypatch.setattr(
+        "instacalendar.runner.OpenRouterExtractor",
+        lambda **kwargs: fake_extractor,
+    )
+    monkeypatch.setattr("instacalendar.runner.IcsExporter", lambda: fake_exporter)
+
+    summary = runner.run(
+        collection="Concerts",
+        from_cache=True,
+        ics_output=tmp_path / "events.ics",
+    )
+
+    assert summary.processed_posts == 1
+    assert summary.exported_events == 1
+    assert fake_extractor.extract.call_args.args[0].media_pk == "1"
+
+
+def test_run_from_cache_prompts_for_cached_collection(tmp_path: Path, monkeypatch) -> None:
+    prompt = FakePrompt(confirm_answer=True)
+    runner = AppRunner(AppPaths.from_base(tmp_path), prompt)
+    runner.configure(
+        instagram_username="musicfan",
+        instagram_password="instagram-secret",
+        openrouter_api_key="openrouter-secret",
+        openrouter_text_model="text",
+        openrouter_vision_model="vision",
+    )
+    runner.cache.initialize()
+    runner.cache.upsert_cached_post(
+        collection_name="Concerts",
+        post=InstagramPost(media_pk="1", caption="", media_kind="image"),
+        fetched_at=datetime(2026, 4, 2, 12, 0, tzinfo=UTC),
+        media=[],
+    )
+
+    fake_extractor = Mock()
+    fake_extractor.extract.return_value = ExtractionResult(status="not_event")
+    monkeypatch.setattr(
+        "instacalendar.runner.OpenRouterExtractor",
+        lambda **kwargs: fake_extractor,
+    )
+    monkeypatch.setattr("instacalendar.runner.IcsExporter", lambda: Mock(export=Mock()))
+
+    runner.run(from_cache=True, ics_output=tmp_path / "events.ics")
+
+    assert fake_extractor.extract.call_args.args[0].media_pk == "1"
+
+
+def test_run_from_cache_fails_when_collection_has_no_posts(tmp_path: Path) -> None:
+    runner = AppRunner(AppPaths.from_base(tmp_path), FakePrompt(confirm_answer=True))
+    runner.configure(
+        instagram_username="musicfan",
+        instagram_password="instagram-secret",
+        openrouter_api_key="openrouter-secret",
+        openrouter_text_model="text",
+        openrouter_vision_model="vision",
+    )
+
+    try:
+        runner.run(from_cache=True, collection="Missing", ics_output=tmp_path / "events.ics")
+    except RuntimeError as error:
+        assert "No cached posts found" in str(error)
+    else:
+        raise AssertionError("expected RuntimeError")

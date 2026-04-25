@@ -13,6 +13,13 @@ class ImageReference(BaseModel):
     mime_type: str | None = None
 
 
+class VideoReference(BaseModel):
+    """Local or remote video attached to an Instagram post."""
+
+    uri: str
+    mime_type: str | None = None
+
+
 class InstagramPost(BaseModel):
     """Normalized Instagram media used by extraction adapters."""
 
@@ -24,6 +31,7 @@ class InstagramPost(BaseModel):
     location_name: str | None = None
     location_address: str | None = None
     images: list[ImageReference] = Field(default_factory=list)
+    videos: list[VideoReference] = Field(default_factory=list)
 
     @property
     def source_url(self) -> str | None:
