@@ -1,9 +1,19 @@
 from __future__ import annotations
 
+import logging
+import time
 from datetime import UTC
 from typing import Any
 
+from instagrapi.exceptions import ClientError
+
 from instacalendar.models import ImageReference, InstagramPost
+
+logger = logging.getLogger(__name__)
+
+
+class InstagramFetchError(RuntimeError):
+    pass
 
 
 class InstagramAdapter:
@@ -46,6 +56,8 @@ class LiveInstagramClient:
         self.session_file = session_file
         self.client = Client()
         self.adapter = InstagramAdapter(self.client)
+        self.fetch_retries = 2
+        self.fetch_retry_delay_seconds = 1.0
 
     def authenticate(self) -> None:
         self.session_file.parent.mkdir(parents=True, exist_ok=True)
@@ -61,5 +73,37 @@ class LiveInstagramClient:
 
     def fetch_collection_posts(self, collection_name: str) -> list[InstagramPost]:
         collection_pk = self.client.collection_pk_by_name(collection_name)
-        medias = self.client.collection_medias(collection_pk, amount=0)
+        medias = []
+        next_max_id = ""
+        while True:
+            try:
+                items, next_max_id = self._fetch_collection_chunk(collection_pk, max_id=next_max_id)
+            except ClientError as error:
+                if medias:
+                    logger.warning(
+                        "Stopped fetching Instagram collection %s after %s posts: %s",
+                        collection_name,
+                        len(medias),
+                        error,
+                    )
+                    break
+                raise InstagramFetchError(
+                    f"Could not fetch posts from Instagram collection {collection_name!r}: {error}"
+                ) from error
+            medias.extend(items)
+            if not items or not next_max_id:
+                break
         return [self.adapter.map_media(media) for media in medias]
+
+    def _fetch_collection_chunk(self, collection_pk: str, *, max_id: str) -> tuple[list[Any], str]:
+        retries = getattr(self, "fetch_retries", 2)
+        delay_seconds = getattr(self, "fetch_retry_delay_seconds", 1.0)
+        for attempt in range(retries + 1):
+            try:
+                return self.client.collection_medias_v1_chunk(collection_pk, max_id=max_id)
+            except ClientError:
+                if attempt >= retries:
+                    raise
+                if delay_seconds:
+                    time.sleep(delay_seconds)
+        raise AssertionError("unreachable")
