@@ -100,6 +100,22 @@ Class docstrings should document fields and their intent.
 
 **Before committing**, ask: "Did I update the docs?"
 
+# MEMORY
+
+(This section is agent managed)
+
+- [2026-04-22] Example memory
+
+## Memory Management
+
+- Remember the # MEMORY section of this file before taking actions to avoid repeating past mistakes.
+- After completing a task, if you encounter a non-obvious codebase quirk or a problem that took more than one attempt to fix, immediately update the # MEMORY section with a concise lesson.
+- Always prefix memories with [YYYY-MM-DD]
+- Self-Pruning: If a memory entry is no longer accurate due to code changes, remove or update it.
+- Compaction: Keep the # MEMORY section under 50 lines to manage context efficiency. If memories become redundant or have repetitions that can be generalized, compact the memories by merging similar lessons into a single rule.
+
+**After finishing a task**, ask: "Did I update # MEMORY?"
+
 ## Python Development
 
 - use `uv` for package and dependency managenent, and for running python code
