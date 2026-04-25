@@ -1,0 +1,1 @@
+We want the event data extracted from Instagram posts to be stored in a shared database. Extracted event data should be keyed by post ID, model used for extraction, and software version. The goal is to lower cost and carbon footprint incurred by passing the same Instagram posts through the event extraction pipeline and LLM/VLM inference passes.
