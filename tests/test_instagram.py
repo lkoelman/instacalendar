@@ -27,6 +27,7 @@ def test_instagram_adapter_maps_media_object_to_post_contract() -> None:
         caption_text="May 3 at The Room",
         taken_at=datetime(2026, 4, 1, 12, 0),
         media_type=1,
+        user=SimpleNamespace(username="venue"),
         thumbnail_url="https://cdn.example/post.jpg",
         resources=[],
         location=SimpleNamespace(name="The Room", address="1 Main St"),
@@ -38,6 +39,7 @@ def test_instagram_adapter_maps_media_object_to_post_contract() -> None:
     assert post.source_url == "https://www.instagram.com/p/abc/"
     assert post.taken_at is not None
     assert post.taken_at.tzinfo is not None
+    assert post.poster_username == "venue"
     assert post.location_name == "The Room"
     assert post.images[0].uri == "https://cdn.example/post.jpg"
 

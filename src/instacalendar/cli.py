@@ -93,6 +93,9 @@ class RichProgressTask:
         if self.task_id is not None:
             self.progress.advance(self.task_id)
 
+    def report(self, message: str) -> None:
+        self.progress.console.print(f"- {message}")
+
 
 @app.callback(invoke_without_command=True)
 def main(

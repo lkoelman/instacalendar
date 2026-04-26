@@ -42,8 +42,10 @@ class InstagramAdapter:
             if video_url:
                 videos.append(VideoReference(uri=str(video_url)))
         location = getattr(media, "location", None)
+        user = getattr(media, "user", None)
         return InstagramPost(
             media_pk=str(media.pk),
+            poster_username=getattr(user, "username", None) if user else None,
             shortcode=getattr(media, "code", None),
             caption=caption,
             taken_at=taken_at,

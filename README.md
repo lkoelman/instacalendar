@@ -72,6 +72,11 @@ Run a configured collection directly:
 uv run instacalendar run --collection "Concerts" --ics-output events.ics
 ```
 
+During extraction, the CLI shows a post progress meter and status messages such
+as `Interpreting post text`, `Falling back to image`, and `Interpreting image`.
+After each post, it prints a persistent summary bullet with the poster, post
+date, extraction outcome, and inferred event date/location.
+
 Retry extraction/export from posts already saved in the local cache:
 
 ```bash

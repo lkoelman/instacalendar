@@ -24,6 +24,7 @@ class InstagramPost(BaseModel):
     """Normalized Instagram media used by extraction adapters."""
 
     media_pk: str
+    poster_username: str | None = None
     shortcode: str | None = None
     caption: str = ""
     taken_at: datetime | None = None

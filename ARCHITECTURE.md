@@ -76,7 +76,7 @@ Defines the Pydantic contracts shared across adapters:
 
 - `ImageReference`: remote or local image URI and optional MIME type.
 - `VideoReference`: remote or local video URI and optional MIME type.
-- `InstagramPost`: normalized Instagram media metadata sent to extraction.
+- `InstagramPost`: normalized Instagram media metadata sent to extraction, including the poster username when Instagram provides it.
 - `EventDraft`: candidate event data reviewed by the user and exported.
 - `ExtractionResult`: structured model output for one Instagram post.
 - `ExportRecord`: typed export metadata contract.
@@ -249,7 +249,7 @@ OpenRouter JSON parsing, HTTP failures, Google API errors, and filesystem errors
 
 ### Logging and Observability
 
-The CLI shows user-facing progress with Rich status messages and a determinate post-processing meter during extraction. The Instagram adapter uses module logging for partial-fetch warnings. There is no structured logging, metrics, tracing, telemetry, or persistent run log.
+The CLI shows user-facing progress with Rich status messages and a determinate post-processing meter during extraction. After each processed post, it prints a persistent summary bullet with the poster, post date, extraction outcome, and inferred event date/location. The Instagram adapter uses module logging for partial-fetch warnings. There is no structured logging, metrics, tracing, telemetry, or persistent run log.
 
 ### Security and Privacy
 

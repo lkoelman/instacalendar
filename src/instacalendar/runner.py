@@ -18,7 +18,13 @@ from instacalendar.exporters.google import GoogleCalendarExporter
 from instacalendar.exporters.ics import IcsExporter
 from instacalendar.extractors.openrouter import OpenRouterExtractor
 from instacalendar.instagram import LiveInstagramClient
-from instacalendar.models import EventDraft, ImageReference, InstagramPost, VideoReference
+from instacalendar.models import (
+    EventDraft,
+    ExtractionResult,
+    ImageReference,
+    InstagramPost,
+    VideoReference,
+)
 from instacalendar.secrets import SecretStore
 
 
@@ -45,6 +51,8 @@ class ProgressTask(Protocol):
 
     def advance(self) -> None: ...
 
+    def report(self, message: str) -> None: ...
+
 
 class NullProgress:
     def status(self, message: str) -> AbstractContextManager[object]:
@@ -65,6 +73,9 @@ class NullProgressTask:
         return None
 
     def advance(self) -> None:
+        return None
+
+    def report(self, message: str) -> None:
         return None
 
 
@@ -188,13 +199,21 @@ class AppRunner:
         approved: list[tuple[str, EventDraft, str, int]] = []
         with self.progress.task("Processing posts", total=len(posts)) as progress_task:
             for post_number, post in enumerate(posts, start=1):
+                extraction_statuses: list[str] = []
 
                 def report_extraction_status(
-                    message: str, *, post_number: int = post_number
+                    message: str,
+                    *,
+                    post_number: int = post_number,
+                    statuses: list[str] = extraction_statuses,
                 ) -> None:
+                    statuses.append(message)
                     progress_task.update(f"Post {post_number}/{len(posts)}: {message}")
 
                 result = extractor.extract(post, status_callback=report_extraction_status)
+                progress_task.report(
+                    self._post_extraction_summary(post, result, extraction_statuses)
+                )
                 progress_task.advance()
                 for index, draft in enumerate(result.events):
                     uid = self.cache.stable_uid(
@@ -273,6 +292,29 @@ class AppRunner:
             f"Confidence: {draft.confidence if draft.confidence is not None else 'unknown'}",
         ]
         return draft.is_exportable and self.prompt.confirm("\n".join(lines), default=True)
+
+    def _post_extraction_summary(
+        self, post: InstagramPost, result: ExtractionResult, extraction_statuses: list[str]
+    ) -> str:
+        poster = post.poster_username or "unknown"
+        posted_date = post.taken_at.date().isoformat() if post.taken_at else "unknown date"
+        if not result.events:
+            return f"@{poster} ({posted_date}) - failed - no event details"
+        source = self._extraction_source(extraction_statuses)
+        details = "; ".join(self._event_summary(draft) for draft in result.events)
+        return f"@{poster} ({posted_date}) - got event from {source} - {details}"
+
+    def _extraction_source(self, extraction_statuses: list[str]) -> str:
+        if "Interpreting video" in extraction_statuses:
+            return "video"
+        if "Interpreting image" in extraction_statuses:
+            return "image"
+        return "text"
+
+    def _event_summary(self, draft: EventDraft) -> str:
+        event_date = draft.start.date().isoformat() if draft.start else "date unknown"
+        location = draft.display_location() or "location unknown"
+        return f"{event_date} at {location}"
 
     def _resolve_openrouter_api_key(self, explicit_api_key: str | None) -> str:
         if explicit_api_key:

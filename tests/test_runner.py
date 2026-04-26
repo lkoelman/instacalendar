@@ -43,6 +43,7 @@ class FakeProgress:
         self.messages: list[str] = []
         self.tasks: list[tuple[str, int]] = []
         self.task_updates: list[str] = []
+        self.task_reports: list[str] = []
         self.task_advances = 0
 
     def status(self, message: str):
@@ -58,6 +59,9 @@ class FakeProgress:
 
     def advance(self) -> None:
         self.task_advances += 1
+
+    def report(self, message: str) -> None:
+        self.task_reports.append(message)
 
     def __enter__(self):
         return self
@@ -173,11 +177,79 @@ def test_run_reports_progress_for_instagram_extraction_and_export(
     ]
     assert progress.tasks == [("Processing posts", 1)]
     assert progress.task_updates == ["Post 1/1: Interpreting post text"]
+    assert progress.task_reports == ["@unknown (unknown date) - failed - no event details"]
     assert progress.task_advances == 1
     fake_extractor.extract.assert_called_once()
     assert fake_extractor.extract.call_args.kwargs["status_callback"] is not None
 
     assert runner.cache.load_cached_posts("Concerts")[0].media_pk == "1"
+
+
+def test_run_reports_completed_post_with_event_source_and_details(
+    tmp_path: Path, monkeypatch
+) -> None:
+    paths = AppPaths.from_base(tmp_path)
+    progress = FakeProgress()
+    runner = AppRunner(paths, FakePrompt(confirm_answer=True), progress=progress)
+    runner.configure(
+        instagram_username="musicfan",
+        instagram_password="instagram-secret",
+        openrouter_api_key="openrouter-secret",
+        openrouter_text_model="text",
+        openrouter_vision_model="vision",
+    )
+
+    class FakeInstagramClient:
+        def __init__(self, username: str, password: str, session_file: Path) -> None:
+            return None
+
+        def authenticate(self) -> None:
+            return None
+
+        def list_collections(self) -> list[str]:
+            return ["Concerts"]
+
+        def fetch_collection_posts(self, collection_name: str) -> list[InstagramPost]:
+            return [
+                InstagramPost(
+                    media_pk="1",
+                    poster_username="venue",
+                    taken_at=datetime(2026, 4, 2, 12, 0, tzinfo=UTC),
+                    caption="Live Set",
+                    media_kind="image",
+                )
+            ]
+
+    fake_extractor = Mock()
+
+    def fake_extract(post: InstagramPost, *, status_callback):
+        status_callback("Interpreting post text")
+        status_callback("Falling back to image")
+        status_callback("Interpreting image")
+        return ExtractionResult(
+            status="event",
+            events=[
+                EventDraft(
+                    title="Live Set",
+                    start=datetime(2026, 5, 3, 20, 0, tzinfo=UTC),
+                    location_name="The Room",
+                )
+            ],
+        )
+
+    fake_extractor.extract.side_effect = fake_extract
+    monkeypatch.setattr("instacalendar.runner.LiveInstagramClient", FakeInstagramClient)
+    monkeypatch.setattr(
+        "instacalendar.runner.OpenRouterExtractor",
+        lambda **kwargs: fake_extractor,
+    )
+    monkeypatch.setattr("instacalendar.runner.IcsExporter", lambda: Mock(export=Mock()))
+
+    runner.run(ics_output=tmp_path / "events.ics")
+
+    assert progress.task_reports == [
+        "@venue (2026-04-02) - got event from image - 2026-05-03 at The Room"
+    ]
 
 
 def test_run_filters_posts_by_posted_since(tmp_path: Path, monkeypatch) -> None:
