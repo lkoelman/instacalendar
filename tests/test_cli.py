@@ -55,6 +55,51 @@ def test_cli_cache_list_posts_shows_cached_posts(tmp_path: Path, monkeypatch) ->
     assert "abc" in result.stdout
 
 
+def test_cli_cache_info_shows_location_totals_and_collection_breakdown(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from instacalendar.cache import Cache, CachedMedia
+    from instacalendar.config import AppPaths
+    from instacalendar.models import InstagramPost
+
+    monkeypatch.setenv("INSTACALENDAR_HOME", str(tmp_path))
+    paths = AppPaths.from_base(tmp_path)
+    media_file = paths.media_dir / "Concerts" / "1" / "image-0.jpg"
+    media_file.parent.mkdir(parents=True)
+    media_file.write_bytes(b"image bytes")
+    cache = Cache(paths.cache_file)
+    cache.initialize()
+    cache.upsert_cached_post(
+        collection_name="Concerts",
+        post=InstagramPost(media_pk="1", caption="", media_kind="1"),
+        fetched_at=datetime(2026, 4, 2, 12, 0, tzinfo=ZoneInfo("UTC")),
+        media=[
+            CachedMedia(
+                collection_name="Concerts",
+                media_pk="1",
+                media_kind="image",
+                media_index=0,
+                source_url="https://cdn.example/post.jpg",
+                local_path=str(media_file),
+                status="cached",
+                error=None,
+            )
+        ],
+    )
+
+    result = CliRunner().invoke(app, ["cache", "info"])
+
+    assert result.exit_code == 0
+    assert str(paths.cache_file) in result.stdout
+    assert str(paths.media_dir) in result.stdout
+    assert "Total storage" in result.stdout
+    assert "Concerts" in result.stdout
+    assert "Images" in result.stdout
+
+
 def test_cli_auth_writes_config(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("INSTACALENDAR_HOME", str(tmp_path))
     result = CliRunner().invoke(

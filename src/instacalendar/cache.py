@@ -47,6 +47,26 @@ class CachedPostSummary:
     caption_preview: str
 
 
+@dataclass(frozen=True)
+class CacheCollectionInfo:
+    collection_name: str
+    file_counts: dict[str, int]
+    size_bytes: int
+    missing_media_count: int
+
+
+@dataclass(frozen=True)
+class CacheInfo:
+    cache_file: Path
+    media_dir: Path
+    database_size_bytes: int
+    media_size_bytes: int
+    total_size_bytes: int
+    total_file_counts: dict[str, int]
+    missing_media_count: int
+    collections: list[CacheCollectionInfo]
+
+
 class Cache:
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -346,7 +366,76 @@ class Cache:
             )
         return summaries
 
+    def cache_info(self, media_dir: Path) -> CacheInfo:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT collection_name, media_kind, local_path, status
+                FROM cached_media
+                ORDER BY collection_name, media_kind, media_index
+                """
+            ).fetchall()
+
+        collection_counts: dict[str, dict[str, int]] = {}
+        collection_sizes: dict[str, int] = {}
+        collection_missing: dict[str, int] = {}
+        total_counts: dict[str, int] = {}
+        total_missing = 0
+        seen_paths: set[Path] = set()
+
+        for collection_name, media_kind, local_path, status in rows:
+            collection_counts.setdefault(collection_name, {})
+            collection_sizes.setdefault(collection_name, 0)
+            collection_missing.setdefault(collection_name, 0)
+            if status != "cached" or not local_path:
+                collection_missing[collection_name] += 1
+                total_missing += 1
+                continue
+
+            path = Path(local_path)
+            if not path.exists() or not path.is_file():
+                collection_missing[collection_name] += 1
+                total_missing += 1
+                continue
+
+            collection_counts[collection_name][media_kind] = (
+                collection_counts[collection_name].get(media_kind, 0) + 1
+            )
+            total_counts[media_kind] = total_counts.get(media_kind, 0) + 1
+            if path not in seen_paths:
+                size = path.stat().st_size
+                collection_sizes[collection_name] += size
+                seen_paths.add(path)
+
+        media_size_bytes = self._directory_size(media_dir)
+        database_size_bytes = self.path.stat().st_size if self.path.exists() else 0
+        collection_names = set(collection_counts) | set(collection_sizes) | set(collection_missing)
+        collections = [
+            CacheCollectionInfo(
+                collection_name=collection_name,
+                file_counts=collection_counts.get(collection_name, {}),
+                size_bytes=collection_sizes.get(collection_name, 0),
+                missing_media_count=collection_missing.get(collection_name, 0),
+            )
+            for collection_name in sorted(collection_names)
+        ]
+        return CacheInfo(
+            cache_file=self.path,
+            media_dir=media_dir,
+            database_size_bytes=database_size_bytes,
+            media_size_bytes=media_size_bytes,
+            total_size_bytes=database_size_bytes + media_size_bytes,
+            total_file_counts=total_counts,
+            missing_media_count=total_missing,
+            collections=collections,
+        )
+
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path)
         conn.execute("PRAGMA foreign_keys = ON")
         return conn
+
+    def _directory_size(self, path: Path) -> int:
+        if not path.exists():
+            return 0
+        return sum(file.stat().st_size for file in path.rglob("*") if file.is_file())

@@ -114,3 +114,88 @@ def test_cache_lists_cached_collections(tmp_path: Path) -> None:
         )
 
     assert cache.list_cached_collections() == ["Art", "Concerts"]
+
+
+def test_cache_info_summarizes_files_and_size_by_collection(tmp_path: Path) -> None:
+    cache = Cache(tmp_path / "cache.sqlite3")
+    cache.initialize()
+    media_dir = tmp_path / "media"
+    concert_image = media_dir / "Concerts" / "1" / "image-0.jpg"
+    concert_video = media_dir / "Concerts" / "1" / "video-0.mp4"
+    art_image = media_dir / "Art" / "2" / "image-0.png"
+    concert_image.parent.mkdir(parents=True)
+    concert_image.write_bytes(b"i" * 10)
+    concert_video.write_bytes(b"v" * 30)
+    art_image.parent.mkdir(parents=True)
+    art_image.write_bytes(b"a" * 5)
+
+    cache.upsert_cached_post(
+        collection_name="Concerts",
+        post=InstagramPost(media_pk="1", caption="", media_kind="8"),
+        fetched_at=datetime(2026, 4, 2, 12, 0, tzinfo=ZoneInfo("UTC")),
+        media=[
+            CachedMedia(
+                collection_name="Concerts",
+                media_pk="1",
+                media_kind="image",
+                media_index=0,
+                source_url="https://cdn.example/image.jpg",
+                local_path=str(concert_image),
+                status="cached",
+                error=None,
+            ),
+            CachedMedia(
+                collection_name="Concerts",
+                media_pk="1",
+                media_kind="video",
+                media_index=0,
+                source_url="https://cdn.example/video.mp4",
+                local_path=str(concert_video),
+                status="cached",
+                error=None,
+            ),
+            CachedMedia(
+                collection_name="Concerts",
+                media_pk="1",
+                media_kind="video",
+                media_index=1,
+                source_url="https://cdn.example/missing.mp4",
+                local_path=None,
+                status="failed",
+                error="timeout",
+            ),
+        ],
+    )
+    cache.upsert_cached_post(
+        collection_name="Art",
+        post=InstagramPost(media_pk="2", caption="", media_kind="1"),
+        fetched_at=datetime(2026, 4, 2, 12, 0, tzinfo=ZoneInfo("UTC")),
+        media=[
+            CachedMedia(
+                collection_name="Art",
+                media_pk="2",
+                media_kind="image",
+                media_index=0,
+                source_url="https://cdn.example/art.png",
+                local_path=str(art_image),
+                status="cached",
+                error=None,
+            )
+        ],
+    )
+
+    info = cache.cache_info(media_dir)
+
+    assert info.cache_file == tmp_path / "cache.sqlite3"
+    assert info.media_dir == media_dir
+    assert info.database_size_bytes > 0
+    assert info.media_size_bytes == 45
+    assert info.total_size_bytes == info.database_size_bytes + 45
+    assert info.total_file_counts == {"image": 2, "video": 1}
+    assert info.missing_media_count == 1
+    assert [(item.collection_name, item.size_bytes) for item in info.collections] == [
+        ("Art", 5),
+        ("Concerts", 40),
+    ]
+    assert info.collections[1].file_counts == {"image": 1, "video": 1}
+    assert info.collections[1].missing_media_count == 1

@@ -202,6 +202,50 @@ def cache_list_posts(
     console.print(table)
 
 
+@cache_app.command("info")
+def cache_info() -> None:
+    paths = _paths()
+    cache = Cache(paths.cache_file)
+    cache.initialize()
+    info = cache.cache_info(paths.media_dir)
+    console.print(f"Cache file: {info.cache_file}")
+    console.print(f"Media directory: {info.media_dir}")
+    console.print(f"Database storage: {_format_bytes(info.database_size_bytes)}")
+    console.print(f"Media storage: {_format_bytes(info.media_size_bytes)}")
+    console.print(f"Total storage: {_format_bytes(info.total_size_bytes)}")
+    console.print(f"Total files: {_format_file_counts(info.total_file_counts)}")
+    if info.missing_media_count:
+        console.print(f"Missing media records: {info.missing_media_count}")
+
+    if not info.collections:
+        console.print("No cached media recorded")
+        return
+
+    table = Table(title="Cache By Collection")
+    table.add_column("Collection")
+    table.add_column("Images", justify="right")
+    table.add_column("Videos", justify="right")
+    table.add_column("Other", justify="right")
+    table.add_column("Missing", justify="right")
+    table.add_column("Storage", justify="right")
+    for collection in info.collections:
+        table.add_row(
+            collection.collection_name,
+            str(collection.file_counts.get("image", 0)),
+            str(collection.file_counts.get("video", 0)),
+            str(
+                sum(
+                    count
+                    for kind, count in collection.file_counts.items()
+                    if kind not in {"image", "video"}
+                )
+            ),
+            str(collection.missing_media_count),
+            _format_bytes(collection.size_bytes),
+        )
+    console.print(table)
+
+
 @cache_app.command("clear")
 def cache_clear(
     yes: Annotated[bool, typer.Option("--yes", help="Confirm cache deletion")] = False,
@@ -215,3 +259,21 @@ def cache_clear(
         shutil.rmtree(_paths().media_dir)
     Cache(path).initialize()
     console.print(f"Cleared cache at {datetime.now(UTC).isoformat()}")
+
+
+def _format_file_counts(file_counts: dict[str, int]) -> str:
+    if not file_counts:
+        return "0 files"
+    parts = [f"{kind}: {file_counts[kind]}" for kind in sorted(file_counts)]
+    return ", ".join(parts)
+
+
+def _format_bytes(size: int) -> str:
+    units = ["B", "KiB", "MiB", "GiB"]
+    value = float(size)
+    for unit in units:
+        if value < 1024 or unit == units[-1]:
+            if unit == "B":
+                return f"{int(value)} {unit}"
+            return f"{value:.1f} {unit}"
+        value /= 1024

@@ -110,7 +110,7 @@ Provides local SQLite persistence for cached posts, cached media metadata, revie
 - `cached_posts(collection_name, media_pk, post_json, fetched_at)`
 - `cached_media(collection_name, media_pk, media_kind, media_index, source_url, local_path, status, error)`
 
-`stable_uid()` derives deterministic event UIDs from Instagram media PK, event index, title, and start value. `has_export()` prevents reruns from exporting the same UID to the same destination. Cached posts can be listed by collection and loaded back into `InstagramPost` objects for `--from-cache` runs.
+`stable_uid()` derives deterministic event UIDs from Instagram media PK, event index, title, and start value. `has_export()` prevents reruns from exporting the same UID to the same destination. Cached posts can be listed by collection, summarized by storage usage, and loaded back into `InstagramPost` objects for `--from-cache` runs.
 
 Key technologies: SQLite, SHA-256 stable IDs.
 
@@ -195,6 +195,7 @@ There is no asynchronous job queue, pub/sub system, server process, or backgroun
 - `instacalendar run`: executes export with saved configuration and optional `--collection`, `--ics-output`, `--posted-since`, `--limit`, and `--from-cache`.
 - `instacalendar cache list-events`: prints recorded exports.
 - `instacalendar cache list-posts`: prints cached posts in a multi-column table.
+- `instacalendar cache info`: prints cache locations, total storage, and per-collection file counts/storage.
 - `instacalendar cache clear --yes`: deletes and reinitializes the local SQLite cache and cached media files.
 
 ### Internal Interfaces
@@ -273,7 +274,7 @@ Tests live in `tests/` and focus on adapter boundaries plus orchestration behavi
 
 - `test_models.py`: Pydantic validation, source URL derivation, and exportability rules.
 - `test_config.py`: app path overrides and config round trips.
-- `test_cache.py`: SQLite initialization, stable UID use, cached post/media round trips, cached post summaries, and export idempotency.
+- `test_cache.py`: SQLite initialization, stable UID use, cached post/media round trips, cached post summaries, cache storage summaries, and export idempotency.
 - `test_instagram.py`: image/video media mapping, paged collection fetches, partial failure behavior, and first-page failure errors.
 - `test_openrouter.py`: OpenRouter request headers/payloads, local cached image encoding, and JSON response parsing with `respx`.
 - `test_ics_exporter.py`: `.ics` UID, location, description, performers, and source URL output.
