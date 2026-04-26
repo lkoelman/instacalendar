@@ -222,17 +222,20 @@ class OpenRouterExtractor:
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             total_tokens=total_tokens,
-            estimated_cost_usd=self._response_cost(response),
+            estimated_cost_usd=self._response_cost(response, model),
         )
 
-    def _response_cost(self, response: Any) -> float | None:
+    def _response_cost(self, response: Any, model: str) -> float | None:
         hidden_params = self._get(response, "_hidden_params") or {}
         cost = self._get(hidden_params, "response_cost")
         if cost is None:
             cost = self._get(response, "response_cost")
         if cost is None:
             try:
-                cost = self.cost_func(completion_response=response)
+                cost = self.cost_func(
+                    completion_response=response,
+                    model=self._litellm_model(model),
+                )
             except Exception:
                 return None
         return float(cost) if cost is not None else None

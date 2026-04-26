@@ -72,6 +72,49 @@ class FakeProgress:
         return None
 
 
+class ReviewPrompt(FakePrompt):
+    def __init__(self, progress: "ReviewProgress") -> None:
+        super().__init__(confirm_answer=True)
+        self.progress = progress
+        self.review_prompt_saw_active_task = False
+
+    def confirm(self, message: str, *, default: bool = True) -> bool:
+        if message.startswith("Use OPENROUTER_API_KEY"):
+            return super().confirm(message, default=default)
+        self.review_prompt_saw_active_task = self.progress.task_active
+        return super().confirm(message, default=default)
+
+
+class ReviewProgress:
+    def __init__(self) -> None:
+        self.task_active = False
+        self.tasks: list[tuple[str, int]] = []
+
+    def status(self, message: str):
+        return self
+
+    def task(self, description: str, *, total: int):
+        self.tasks.append((description, total))
+        return self
+
+    def update(self, message: str) -> None:
+        return None
+
+    def advance(self) -> None:
+        return None
+
+    def report(self, message: str) -> None:
+        return None
+
+    def __enter__(self):
+        if self.tasks:
+            self.task_active = True
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        self.task_active = False
+
+
 def test_configure_asks_to_use_openrouter_api_key_from_environment(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -185,6 +228,49 @@ def test_run_reports_progress_for_instagram_extraction_and_export(
     assert fake_extractor.extract.call_args.kwargs["status_callback"] is not None
 
     assert runner.cache.load_cached_posts("Concerts")[0].media_pk == "1"
+
+
+def test_run_reviews_events_after_processing_progress_task_exits(
+    tmp_path: Path, monkeypatch
+) -> None:
+    paths = AppPaths.from_base(tmp_path)
+    progress = ReviewProgress()
+    prompt = ReviewPrompt(progress)
+    runner = AppRunner(paths, prompt, progress=progress)
+    runner.configure(
+        instagram_username="musicfan",
+        instagram_password="instagram-secret",
+        openrouter_api_key="openrouter-secret",
+        openrouter_text_model="text",
+        openrouter_vision_model="vision",
+    )
+    runner.cache.initialize()
+    runner.cache.upsert_cached_post(
+        collection_name="Concerts",
+        post=InstagramPost(media_pk="1", caption="Live Set", media_kind="image"),
+        fetched_at=datetime(2026, 4, 2, 12, 0, tzinfo=UTC),
+        media=[],
+    )
+
+    fake_extractor = Mock()
+    fake_extractor.extract.return_value = ExtractionResult(
+        status="event",
+        events=[
+            EventDraft(
+                title="Live Set",
+                start=datetime(2026, 5, 3, 20, 0, tzinfo=UTC),
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        "instacalendar.runner.OpenRouterExtractor",
+        lambda **kwargs: fake_extractor,
+    )
+    monkeypatch.setattr("instacalendar.runner.IcsExporter", lambda: Mock(export=Mock()))
+
+    runner.run(collection="Concerts", from_cache=True, ics_output=tmp_path / "events.ics")
+
+    assert prompt.review_prompt_saw_active_task is False
 
 
 def test_run_reports_runtime_extraction_costs_by_model(tmp_path: Path, monkeypatch) -> None:
@@ -309,7 +395,7 @@ def test_run_reports_completed_post_with_event_source_and_details(
     runner.run(ics_output=tmp_path / "events.ics")
 
     assert progress.task_reports == [
-        "@venue (2026-04-02) - got event from image - 2026-05-03 at The Room"
+        "@venue (2026-04-02) - Identified event details from image => 2026-05-03 at The Room"
     ]
 
 
@@ -375,7 +461,7 @@ def test_run_reports_completed_post_from_video_fallback(tmp_path: Path, monkeypa
     runner.run(ics_output=tmp_path / "events.ics")
 
     assert progress.task_reports == [
-        "@venue (2026-04-02) - got event from video - 2026-05-03 at The Room"
+        "@venue (2026-04-02) - Identified event details from video => 2026-05-03 at The Room"
     ]
 
 

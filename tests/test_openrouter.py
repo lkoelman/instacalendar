@@ -107,6 +107,34 @@ def test_openrouter_prefixes_provider_style_model_ids_for_openrouter() -> None:
     assert calls[0]["model"] == "openrouter/openai/gpt-4o-mini"
 
 
+def test_openrouter_passes_openrouter_model_to_litellm_cost_fallback() -> None:
+    cost_calls = []
+
+    OpenRouterExtractor(
+        api_key="key",
+        text_model="qwen/qwen3.5-9b",
+        vision_model="google/gemini-3-flash-preview",
+        completion_func=lambda **kwargs: _response(
+            """
+            {
+              "status": "event",
+              "confidence": 0.91,
+              "events": [{"title": "Live Set", "start": "2026-05-03T20:00:00-04:00"}],
+              "warnings": []
+            }
+            """,
+            prompt_tokens=100,
+            completion_tokens=20,
+        ),
+        cost_func=lambda **kwargs: cost_calls.append(kwargs) or 0.001,
+    ).extract(
+        InstagramPost(media_pk="1", caption="Live Set", media_kind="image"),
+        usage_callback=lambda usage: None,
+    )
+
+    assert cost_calls[0]["model"] == "openrouter/qwen/qwen3.5-9b"
+
+
 def test_openrouter_reports_text_interpretation_status() -> None:
     messages: list[str] = []
 

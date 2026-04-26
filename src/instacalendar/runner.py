@@ -255,6 +255,7 @@ class AppRunner:
             video_model=video_model,
         )
         run_usage = ExtractionUsageTracker()
+        review_candidates: list[tuple[InstagramPost, int, EventDraft, str]] = []
         approved: list[tuple[str, EventDraft, str, int]] = []
         with self.progress.task("Processing posts", total=len(posts)) as progress_task:
             for post_number, post in enumerate(posts, start=1):
@@ -323,17 +324,20 @@ class AppRunner:
                         draft.title,
                         draft.start.isoformat() if draft.start else "",
                     )
-                    export_destination = destination or config.default_export
-                    destination_id = str(ics_output) if export_destination == "ics" else (
-                        config.google_calendar_id or "primary"
-                    )
-                    if self.cache.has_export(uid, export_destination, destination_id):
-                        continue
-                    if self._review(draft):
-                        self.cache.record_review(post.media_pk, index, "approved", uid)
-                        approved.append((uid, draft, post.media_pk, index))
-                    else:
-                        self.cache.record_review(post.media_pk, index, "skipped", uid)
+                    review_candidates.append((post, index, draft, uid))
+
+        for post, index, draft, uid in review_candidates:
+            export_destination = destination or config.default_export
+            destination_id = str(ics_output) if export_destination == "ics" else (
+                config.google_calendar_id or "primary"
+            )
+            if self.cache.has_export(uid, export_destination, destination_id):
+                continue
+            if self._review(draft):
+                self.cache.record_review(post.media_pk, index, "approved", uid)
+                approved.append((uid, draft, post.media_pk, index))
+            else:
+                self.cache.record_review(post.media_pk, index, "skipped", uid)
 
         export_destination = destination or config.default_export
         exported_count = 0
@@ -411,7 +415,7 @@ class AppRunner:
             return self._with_usage_summary(summary, post_usage, run_usage)
         source = self._extraction_source(extraction_statuses)
         details = "; ".join(self._event_summary(draft) for draft in result.events)
-        summary = f"@{poster} ({posted_date}) - got event from {source} - {details}"
+        summary = f"@{poster} ({posted_date}) - Identified event details from {source} => {details}"
         return self._with_usage_summary(summary, post_usage, run_usage)
 
     def _with_usage_summary(
