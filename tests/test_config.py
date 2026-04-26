@@ -10,6 +10,7 @@ def test_config_round_trips_model_choices_and_export_defaults(tmp_path: Path) ->
         instagram_username="musicfan",
         openrouter_text_model="openai/gpt-4o-mini",
         openrouter_vision_model="openai/gpt-4o",
+        openrouter_video_model="google/gemini-2.5-flash",
         default_export="ics",
         google_calendar_id="primary",
     )

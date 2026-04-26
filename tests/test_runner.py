@@ -27,6 +27,7 @@ class FakePrompt:
             "OpenRouter API key": "typed-openrouter-key",
             "OpenRouter text model": default or "text",
             "OpenRouter vision model": default or "vision",
+            "OpenRouter video model": default or "video",
         }
         return values[message]
 
@@ -250,6 +251,155 @@ def test_run_reports_completed_post_with_event_source_and_details(
     assert progress.task_reports == [
         "@venue (2026-04-02) - got event from image - 2026-05-03 at The Room"
     ]
+
+
+def test_run_reports_completed_post_from_video_fallback(tmp_path: Path, monkeypatch) -> None:
+    paths = AppPaths.from_base(tmp_path)
+    progress = FakeProgress()
+    runner = AppRunner(paths, FakePrompt(confirm_answer=True), progress=progress)
+    runner.configure(
+        instagram_username="musicfan",
+        instagram_password="instagram-secret",
+        openrouter_api_key="openrouter-secret",
+        openrouter_text_model="text",
+        openrouter_vision_model="vision",
+        openrouter_video_model="video",
+    )
+
+    class FakeInstagramClient:
+        def __init__(self, username: str, password: str, session_file: Path) -> None:
+            return None
+
+        def authenticate(self) -> None:
+            return None
+
+        def list_collections(self) -> list[str]:
+            return ["Concerts"]
+
+        def fetch_collection_posts(self, collection_name: str) -> list[InstagramPost]:
+            return [
+                InstagramPost(
+                    media_pk="1",
+                    poster_username="venue",
+                    taken_at=datetime(2026, 4, 2, 12, 0, tzinfo=UTC),
+                    caption="Live Set",
+                    media_kind="video",
+                )
+            ]
+
+    fake_extractor = Mock()
+
+    def fake_extract(post: InstagramPost, *, status_callback):
+        status_callback("Interpreting post text")
+        status_callback("Falling back to video")
+        status_callback("Interpreting video")
+        return ExtractionResult(
+            status="event",
+            events=[
+                EventDraft(
+                    title="Live Set",
+                    start=datetime(2026, 5, 3, 20, 0, tzinfo=UTC),
+                    location_name="The Room",
+                )
+            ],
+        )
+
+    fake_extractor.extract.side_effect = fake_extract
+    monkeypatch.setattr("instacalendar.runner.LiveInstagramClient", FakeInstagramClient)
+    monkeypatch.setattr(
+        "instacalendar.runner.OpenRouterExtractor",
+        lambda **kwargs: fake_extractor,
+    )
+    monkeypatch.setattr("instacalendar.runner.IcsExporter", lambda: Mock(export=Mock()))
+
+    runner.run(ics_output=tmp_path / "events.ics")
+
+    assert progress.task_reports == [
+        "@venue (2026-04-02) - got event from video - 2026-05-03 at The Room"
+    ]
+
+
+def test_run_passes_configured_video_model_to_extractor(tmp_path: Path, monkeypatch) -> None:
+    runner = AppRunner(AppPaths.from_base(tmp_path), FakePrompt(confirm_answer=True))
+    runner.configure(
+        instagram_username="musicfan",
+        instagram_password="instagram-secret",
+        openrouter_api_key="openrouter-secret",
+        openrouter_text_model="text",
+        openrouter_vision_model="vision",
+        openrouter_video_model="video",
+    )
+
+    class FakeInstagramClient:
+        def __init__(self, username: str, password: str, session_file: Path) -> None:
+            return None
+
+        def authenticate(self) -> None:
+            return None
+
+        def list_collections(self) -> list[str]:
+            return ["Concerts"]
+
+        def fetch_collection_posts(self, collection_name: str) -> list[InstagramPost]:
+            return [InstagramPost(media_pk="1", caption="", media_kind="video")]
+
+    extractor_kwargs = {}
+    fake_extractor = Mock()
+    fake_extractor.extract.return_value = ExtractionResult(status="not_event")
+
+    def fake_extractor_factory(**kwargs):
+        extractor_kwargs.update(kwargs)
+        return fake_extractor
+
+    monkeypatch.setattr("instacalendar.runner.LiveInstagramClient", FakeInstagramClient)
+    monkeypatch.setattr("instacalendar.runner.OpenRouterExtractor", fake_extractor_factory)
+    monkeypatch.setattr("instacalendar.runner.IcsExporter", lambda: Mock(export=Mock()))
+
+    runner.run(ics_output=tmp_path / "events.ics")
+
+    assert extractor_kwargs["video_model"] == "video"
+
+
+def test_run_uses_vision_model_for_video_when_config_has_no_video_model(
+    tmp_path: Path, monkeypatch
+) -> None:
+    runner = AppRunner(AppPaths.from_base(tmp_path), FakePrompt(confirm_answer=True))
+    runner.configure(
+        instagram_username="musicfan",
+        instagram_password="instagram-secret",
+        openrouter_api_key="openrouter-secret",
+        openrouter_text_model="text",
+        openrouter_vision_model="vision",
+    )
+
+    class FakeInstagramClient:
+        def __init__(self, username: str, password: str, session_file: Path) -> None:
+            return None
+
+        def authenticate(self) -> None:
+            return None
+
+        def list_collections(self) -> list[str]:
+            return ["Concerts"]
+
+        def fetch_collection_posts(self, collection_name: str) -> list[InstagramPost]:
+            return [InstagramPost(media_pk="1", caption="", media_kind="video")]
+
+    extractor_kwargs = {}
+    fake_extractor = Mock()
+    fake_extractor.extract.return_value = ExtractionResult(status="not_event")
+
+    def fake_extractor_factory(**kwargs):
+        extractor_kwargs.update(kwargs)
+        return fake_extractor
+
+    monkeypatch.setattr("instacalendar.runner.LiveInstagramClient", FakeInstagramClient)
+    monkeypatch.setattr("instacalendar.runner.OpenRouterExtractor", fake_extractor_factory)
+    monkeypatch.setattr("instacalendar.runner.IcsExporter", lambda: Mock(export=Mock()))
+
+    runner.run(ics_output=tmp_path / "events.ics")
+
+    assert extractor_kwargs["video_model"] == "vision"
 
 
 def test_run_filters_posts_by_posted_since(tmp_path: Path, monkeypatch) -> None:

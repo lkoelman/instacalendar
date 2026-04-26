@@ -104,7 +104,7 @@ Class docstrings should document fields and their intent.
 
 (This section is agent managed)
 
-- [2026-04-22] Example memory
+- [2026-04-26] Optional config additions should preserve non-interactive `auth` flows; add CLI regression coverage before introducing new prompts.
 
 ## Memory Management
 

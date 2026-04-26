@@ -21,11 +21,13 @@ class OpenRouterExtractor:
         api_key: str,
         text_model: str,
         vision_model: str,
+        video_model: str | None = None,
         client: httpx.Client | None = None,
     ) -> None:
         self.api_key = api_key
         self.text_model = text_model
         self.vision_model = vision_model
+        self.video_model = video_model or vision_model
         self.client = client or httpx.Client(timeout=60)
 
     def extract(
@@ -36,22 +38,39 @@ class OpenRouterExtractor:
     ) -> ExtractionResult:
         if status_callback:
             status_callback("Interpreting post text")
-        result = self._call_model(post, self.text_model, include_images=False)
-        if result.status == "event" and result.events and min(
-            (event.confidence or result.confidence or 0) for event in result.events
-        ) >= 0.7:
+        result = self._call_model(post, self.text_model, include_images=False, include_videos=False)
+        if self._is_confident_event(result):
             return result
         if post.images:
             if status_callback:
                 status_callback("Falling back to image")
                 status_callback("Interpreting image")
-            return self._call_model(post, self.vision_model, include_images=True)
-        if status_callback:
+            result = self._call_model(
+                post,
+                self.vision_model,
+                include_images=True,
+                include_videos=False,
+            )
+            if self._is_confident_event(result):
+                return result
+        elif status_callback:
             status_callback("No image fallback available")
+        if self._local_video_uris(post):
+            if status_callback:
+                status_callback("Falling back to video")
+                status_callback("Interpreting video")
+            return self._call_model(
+                post,
+                self.video_model,
+                include_images=False,
+                include_videos=True,
+            )
+        if status_callback:
+            status_callback("No video fallback available")
         return result
 
     def _call_model(
-        self, post: InstagramPost, model: str, *, include_images: bool
+        self, post: InstagramPost, model: str, *, include_images: bool, include_videos: bool
     ) -> ExtractionResult:
         payload = {
             "model": model,
@@ -66,7 +85,11 @@ class OpenRouterExtractor:
                 },
                 {
                     "role": "user",
-                    "content": self._user_content(post, include_images=include_images),
+                    "content": self._user_content(
+                        post,
+                        include_images=include_images,
+                        include_videos=include_videos,
+                    ),
                 },
             ],
             "response_format": {"type": "json_object"},
@@ -87,7 +110,7 @@ class OpenRouterExtractor:
         return self._parse_result(content, model)
 
     def _user_content(
-        self, post: InstagramPost, *, include_images: bool
+        self, post: InstagramPost, *, include_images: bool, include_videos: bool
     ) -> str | list[dict[str, Any]]:
         text = {
             "media_pk": post.media_pk,
@@ -98,19 +121,37 @@ class OpenRouterExtractor:
             "location_address": post.location_address,
         }
         prompt = f"Instagram post metadata:\n{json.dumps(text, ensure_ascii=False)}"
-        if not include_images:
+        if not include_images and not include_videos:
             return prompt
         content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
-        for image in post.images:
-            content.append({"type": "image_url", "image_url": {"url": self._image_url(image.uri)}})
+        if include_images:
+            for image in post.images:
+                content.append(
+                    {"type": "image_url", "image_url": {"url": self._image_url(image.uri)}}
+                )
+        if include_videos:
+            for uri in self._local_video_uris(post):
+                content.append({"type": "video_url", "video_url": {"url": self._data_url(uri)}})
         return content
 
     def _image_url(self, uri: str) -> str:
         path = Path(uri)
         if not path.exists():
             return uri
+        return self._data_url(uri)
+
+    def _local_video_uris(self, post: InstagramPost) -> list[str]:
+        return [video.uri for video in post.videos if Path(video.uri).exists()]
+
+    def _data_url(self, uri: str) -> str:
+        path = Path(uri)
         mime_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
         return f"data:{mime_type};base64,{b64encode(path.read_bytes()).decode()}"
+
+    def _is_confident_event(self, result: ExtractionResult) -> bool:
+        if result.status != "event" or not result.events:
+            return False
+        return min((event.confidence or result.confidence or 0) for event in result.events) >= 0.7
 
     def _parse_result(self, content: str, model: str) -> ExtractionResult:
         data = json.loads(content)

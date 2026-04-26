@@ -36,6 +36,7 @@ uv run instacalendar auth \
   --openrouter-api-key sk-or-v1-... \
   --openrouter-text-model openai/gpt-4o-mini \
   --openrouter-vision-model openai/gpt-4o \
+  --openrouter-video-model google/gemini-2.5-flash \
   --default-export ics
 ```
 
@@ -73,7 +74,8 @@ uv run instacalendar run --collection "Concerts" --ics-output events.ics
 ```
 
 During extraction, the CLI shows a post progress meter and status messages such
-as `Interpreting post text`, `Falling back to image`, and `Interpreting image`.
+as `Interpreting post text`, `Falling back to image`, `Interpreting image`, and
+`Interpreting video`.
 After each post, it prints a persistent summary bullet with the poster, post
 date, extraction outcome, and inferred event date/location.
 
@@ -105,12 +107,13 @@ uv run instacalendar cache clear --yes
 
 ## Privacy
 
-Instagram captions, post metadata, and image content for posts being processed
-are sent to OpenRouter for extraction. Cached videos are stored locally but are
-not interpreted. Google Calendar export sends approved event details to Google.
-The local cache stores post metadata, downloaded image and video files, review
-decisions, and export records so reruns can retry extraction without contacting
-Instagram and avoid duplicate exports.
+Instagram captions, post metadata, image content, and cached local video content
+for posts being processed may be sent to OpenRouter for extraction. Remote
+Instagram video URLs are not sent when the local video download failed. Google
+Calendar export sends approved event details to Google. The local cache stores
+post metadata, downloaded image and video files, review decisions, and export
+records so reruns can retry extraction without contacting Instagram and avoid
+duplicate exports.
 
 ## Test And Lint
 

@@ -125,6 +125,35 @@ def test_cli_auth_writes_config(tmp_path: Path, monkeypatch) -> None:
     assert "Saved configuration" in result.stdout
 
 
+def test_cli_auth_accepts_openrouter_video_model(tmp_path: Path, monkeypatch) -> None:
+    from instacalendar.config import AppPaths, ConfigStore
+
+    monkeypatch.setenv("INSTACALENDAR_HOME", str(tmp_path))
+    result = CliRunner().invoke(
+        app,
+        [
+            "auth",
+            "--instagram-username",
+            "musicfan",
+            "--instagram-password",
+            "secret",
+            "--openrouter-api-key",
+            "key",
+            "--openrouter-text-model",
+            "text",
+            "--openrouter-vision-model",
+            "vision",
+            "--openrouter-video-model",
+            "video",
+            "--default-export",
+            "ics",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert ConfigStore(AppPaths.from_base(tmp_path)).load().openrouter_video_model == "video"
+
+
 def test_cli_run_passes_post_filters_to_runner(monkeypatch) -> None:
     calls = []
 

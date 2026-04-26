@@ -134,6 +134,7 @@ def auth(
     openrouter_api_key: Annotated[str | None, typer.Option()] = None,
     openrouter_text_model: Annotated[str | None, typer.Option()] = None,
     openrouter_vision_model: Annotated[str | None, typer.Option()] = None,
+    openrouter_video_model: Annotated[str | None, typer.Option()] = None,
     default_export: Annotated[str, typer.Option()] = "ics",
     google_calendar_id: Annotated[str | None, typer.Option()] = None,
 ) -> None:
@@ -145,6 +146,7 @@ def auth(
         openrouter_api_key=openrouter_api_key,
         openrouter_text_model=openrouter_text_model,
         openrouter_vision_model=openrouter_vision_model,
+        openrouter_video_model=openrouter_video_model,
         default_export=default_export,
         google_calendar_id=google_calendar_id,
     )

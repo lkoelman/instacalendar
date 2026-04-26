@@ -58,6 +58,7 @@ class AppConfig(BaseModel):
     instagram_username: str | None = None
     openrouter_text_model: str | None = None
     openrouter_vision_model: str | None = None
+    openrouter_video_model: str | None = None
     default_export: Literal["ics", "google"] = "ics"
     google_calendar_id: str | None = None
 

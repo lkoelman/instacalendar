@@ -106,6 +106,7 @@ class AppRunner:
         openrouter_api_key: str | None = None,
         openrouter_text_model: str | None = None,
         openrouter_vision_model: str | None = None,
+        openrouter_video_model: str | None = None,
         default_export: str | None = None,
         google_calendar_id: str | None = None,
     ) -> AppConfig:
@@ -120,6 +121,7 @@ class AppRunner:
             openrouter_vision_model=openrouter_vision_model
             or existing.openrouter_vision_model
             or self.prompt.text("OpenRouter vision model", default="openai/gpt-4o"),
+            openrouter_video_model=openrouter_video_model or existing.openrouter_video_model,
             default_export=(default_export or existing.default_export),  # type: ignore[arg-type]
             google_calendar_id=google_calendar_id or existing.google_calendar_id,
         )
@@ -195,6 +197,7 @@ class AppRunner:
             api_key=api_key or "",
             text_model=config.openrouter_text_model or "",
             vision_model=config.openrouter_vision_model or "",
+            video_model=config.openrouter_video_model or config.openrouter_vision_model or "",
         )
         approved: list[tuple[str, EventDraft, str, int]] = []
         with self.progress.task("Processing posts", total=len(posts)) as progress_task:

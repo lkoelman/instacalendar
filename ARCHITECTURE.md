@@ -89,7 +89,7 @@ Key technologies: Pydantic v2.
 
 Resolves application paths and stores non-secret configuration. `AppPaths.default()` uses `INSTACALENDAR_HOME` when set; otherwise it uses platform-specific user config and data directories from `platformdirs`. `ConfigStore` reads and writes `config.json`.
 
-Configured values are Instagram username, OpenRouter text model, OpenRouter vision model, default export destination, and optional Google Calendar ID.
+Configured values are Instagram username, OpenRouter text model, OpenRouter vision model, optional OpenRouter video model, default export destination, and optional Google Calendar ID. If no video model is configured, video fallback uses the configured vision model.
 
 Key technologies: platformdirs, Pydantic, JSON files.
 
@@ -124,7 +124,7 @@ Key technologies: instagrapi, Python logging.
 
 ### `src/instacalendar/extractors/openrouter.py`
 
-Calls OpenRouter's chat completions API. Extraction is text-first: the configured text model receives caption, source URL, taken-at timestamp, and location metadata. The extractor can report phase messages to the runner while it interprets post text and, when needed, falls back to image interpretation. If the result is not a confident event and image references are available, the configured vision model receives the same metadata plus image URL content blocks. Local cached image files are encoded as data URLs for vision requests. Cached videos are stored for completeness but are not sent to OpenRouter.
+Calls OpenRouter's chat completions API. Extraction is text-first: the configured text model receives caption, source URL, taken-at timestamp, and location metadata. The extractor can report phase messages to the runner while it interprets post text and, when needed, falls back to image and then video interpretation. If the result is not a confident event and image references are available, the configured vision model receives the same metadata plus image URL content blocks. If image extraction is still inconclusive and cached local videos are available, the configured video model receives the same metadata plus video URL content blocks. Local cached image and video files are encoded as data URLs for multimodal requests. Remote video URLs are not sent when local caching failed.
 
 Responses are expected to be JSON objects containing `status`, `confidence`, `events`, and `warnings`. Parsed events are validated as `EventDraft` instances.
 
@@ -169,7 +169,7 @@ Key technologies: google-auth-oauthlib, google-api-python-client.
 4. If no collection was passed, Instagram collection names are fetched and the user selects one.
 5. Posts are fetched, normalized to `InstagramPost`, optionally filtered by `--posted-since`, then capped by `--limit`.
 6. Selected posts are stored in SQLite and their image/video media are downloaded under the app data media directory.
-7. Each post is sent to `OpenRouterExtractor.extract()` using local cached images where available.
+7. Each post is sent to `OpenRouterExtractor.extract()` using local cached images and videos where available.
 8. Each returned `EventDraft` receives a stable UID and is skipped if the cache already has an export for the chosen destination.
 9. Exportable drafts are shown to the user for approve/skip review.
 10. Approved drafts are exported to `.ics` or Google Calendar.
@@ -224,7 +224,7 @@ No webhooks or inbound network API are exposed by this application. The only lis
 - Google token at rest: OAuth authorized-user JSON in `AppPaths.google_token_file`.
 - Cache at rest: SQLite database in `AppPaths.cache_file`.
 - Cached media at rest: files under `AppPaths.media_dir`.
-- OpenRouter requests: HTTPS JSON chat completion payloads with text-only or multimodal message content.
+- OpenRouter requests: HTTPS JSON chat completion payloads with text-only, image, or video message content.
 - OpenRouter responses: JSON string in `choices[0].message.content`, parsed into `ExtractionResult`.
 - ICS export: iCalendar 2.0 bytes written by the `icalendar` package.
 - Google export: Google Calendar API JSON event bodies.
@@ -255,7 +255,7 @@ The CLI shows user-facing progress with Rich status messages and a determinate p
 
 Secrets are stored in OS keyring when possible, with a plaintext JSON fallback if keyring access fails. The README discloses that Instagram captions, post metadata, and image content for processed posts are sent to OpenRouter, and approved event details are sent to Google when Google export is used.
 
-The app does not store OpenRouter raw responses. It does store cached post metadata, downloaded Instagram media, local review and export metadata, Instagram session settings, and Google OAuth tokens under the user's app directories.
+The app does not store OpenRouter raw responses. It does store cached post metadata, downloaded Instagram media, local review and export metadata, Instagram session settings, and Google OAuth tokens under the user's app directories. Cached local video files may be encoded and sent to OpenRouter during video fallback; remote video URLs are not sent if the video was not cached locally.
 
 ## Deployment & Infrastructure
 
