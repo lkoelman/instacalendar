@@ -124,7 +124,7 @@ Key technologies: instagrapi, Python logging.
 
 ### `src/instacalendar/extractors/openrouter.py`
 
-Calls OpenRouter's chat completions API. Extraction is text-first: the configured text model receives caption, source URL, taken-at timestamp, and location metadata. If the result is not a confident event and image references are available, the configured vision model receives the same metadata plus image URL content blocks. Local cached image files are encoded as data URLs for vision requests. Cached videos are stored for completeness but are not sent to OpenRouter.
+Calls OpenRouter's chat completions API. Extraction is text-first: the configured text model receives caption, source URL, taken-at timestamp, and location metadata. The extractor can report phase messages to the runner while it interprets post text and, when needed, falls back to image interpretation. If the result is not a confident event and image references are available, the configured vision model receives the same metadata plus image URL content blocks. Local cached image files are encoded as data URLs for vision requests. Cached videos are stored for completeness but are not sent to OpenRouter.
 
 Responses are expected to be JSON objects containing `status`, `confidence`, `events`, and `warnings`. Parsed events are validated as `EventDraft` instances.
 
@@ -249,7 +249,7 @@ OpenRouter JSON parsing, HTTP failures, Google API errors, and filesystem errors
 
 ### Logging and Observability
 
-The CLI shows user-facing progress with Rich status messages. The Instagram adapter uses module logging for partial-fetch warnings. There is no structured logging, metrics, tracing, telemetry, or persistent run log.
+The CLI shows user-facing progress with Rich status messages and a determinate post-processing meter during extraction. The Instagram adapter uses module logging for partial-fetch warnings. There is no structured logging, metrics, tracing, telemetry, or persistent run log.
 
 ### Security and Privacy
 

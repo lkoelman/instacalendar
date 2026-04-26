@@ -101,10 +101,11 @@ uv run instacalendar cache clear --yes
 ## Privacy
 
 Instagram captions, post metadata, and image content for posts being processed
-are sent to OpenRouter for extraction. Google Calendar export sends approved
-event details to Google. The local cache stores post metadata, downloaded image
-and video files, review decisions, and export records so reruns can retry
-extraction without contacting Instagram and avoid duplicate exports.
+are sent to OpenRouter for extraction. Cached videos are stored locally but are
+not interpreted. Google Calendar export sends approved event details to Google.
+The local cache stores post metadata, downloaded image and video files, review
+decisions, and export records so reruns can retry extraction without contacting
+Instagram and avoid duplicate exports.
 
 ## Test And Lint
 

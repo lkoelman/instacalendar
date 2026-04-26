@@ -8,6 +8,7 @@ from typing import Annotated
 import questionary
 import typer
 from rich.console import Console
+from rich.progress import BarColumn, Progress, TaskID, TextColumn, TimeElapsedColumn
 from rich.table import Table
 
 from instacalendar.cache import Cache
@@ -58,6 +59,39 @@ class QuestionaryPrompt:
 class RichProgress:
     def status(self, message: str):
         return console.status(message, spinner="dots")
+
+    def task(self, description: str, *, total: int):
+        return RichProgressTask(description, total=total)
+
+
+class RichProgressTask:
+    def __init__(self, description: str, *, total: int) -> None:
+        self.description = description
+        self.total = total
+        self.progress = Progress(
+            TextColumn("{task.description}"),
+            BarColumn(),
+            TextColumn("{task.completed}/{task.total}"),
+            TimeElapsedColumn(),
+            console=console,
+        )
+        self.task_id: TaskID | None = None
+
+    def __enter__(self) -> RichProgressTask:
+        self.progress.start()
+        self.task_id = self.progress.add_task(self.description, total=self.total)
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        self.progress.stop()
+
+    def update(self, message: str) -> None:
+        if self.task_id is not None:
+            self.progress.update(self.task_id, description=message)
+
+    def advance(self) -> None:
+        if self.task_id is not None:
+            self.progress.advance(self.task_id)
 
 
 @app.callback(invoke_without_command=True)

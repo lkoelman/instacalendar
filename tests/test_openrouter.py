@@ -63,6 +63,41 @@ def test_openrouter_uses_text_model_first_and_returns_event() -> None:
 
 
 @respx.mock
+def test_openrouter_reports_text_interpretation_status() -> None:
+    model_response = {
+        "status": "event",
+        "confidence": 0.91,
+        "events": [
+            {
+                "title": "Live Set",
+                "start": "2026-05-03T20:00:00-04:00",
+                "source_url": "https://www.instagram.com/p/abc/",
+            }
+        ],
+        "warnings": [],
+    }
+    respx.post("https://openrouter.ai/api/v1/chat/completions").mock(
+        return_value=httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": json.dumps(model_response)}}]},
+        )
+    )
+    messages: list[str] = []
+
+    OpenRouterExtractor(
+        api_key="key",
+        text_model="text-model",
+        vision_model="vision-model",
+        client=httpx.Client(),
+    ).extract(
+        InstagramPost(media_pk="1", shortcode="abc", caption="Live Set", media_kind="image"),
+        status_callback=messages.append,
+    )
+
+    assert messages == ["Interpreting post text"]
+
+
+@respx.mock
 def test_openrouter_encodes_local_cached_images_for_vision_fallback(tmp_path: Path) -> None:
     image_path = tmp_path / "poster.jpg"
     image_bytes = b"fake image"
@@ -116,3 +151,61 @@ def test_openrouter_encodes_local_cached_images_for_vision_fallback(tmp_path: Pa
     vision_payload = json.loads(route.calls[1].request.content)
     image_url = vision_payload["messages"][1]["content"][1]["image_url"]["url"]
     assert image_url == f"data:image/jpeg;base64,{base64.b64encode(image_bytes).decode()}"
+
+
+@respx.mock
+def test_openrouter_reports_image_fallback_statuses(tmp_path: Path) -> None:
+    image_path = tmp_path / "poster.jpg"
+    image_path.write_bytes(b"fake image")
+    text_response = {
+        "status": "needs_review",
+        "confidence": 0.2,
+        "events": [],
+        "warnings": [],
+    }
+    vision_response = {
+        "status": "event",
+        "confidence": 0.91,
+        "events": [
+            {
+                "title": "Live Set",
+                "start": "2026-05-03T20:00:00-04:00",
+            }
+        ],
+        "warnings": [],
+    }
+    respx.post("https://openrouter.ai/api/v1/chat/completions").mock(
+        side_effect=[
+            httpx.Response(
+                200,
+                json={"choices": [{"message": {"content": json.dumps(text_response)}}]},
+            ),
+            httpx.Response(
+                200,
+                json={"choices": [{"message": {"content": json.dumps(vision_response)}}]},
+            ),
+        ]
+    )
+    messages: list[str] = []
+
+    OpenRouterExtractor(
+        api_key="key",
+        text_model="text-model",
+        vision_model="vision-model",
+        client=httpx.Client(),
+    ).extract(
+        InstagramPost(
+            media_pk="1",
+            shortcode="abc",
+            caption="Live Set",
+            media_kind="image",
+            images=[ImageReference(uri=str(image_path))],
+        ),
+        status_callback=messages.append,
+    )
+
+    assert messages == [
+        "Interpreting post text",
+        "Falling back to image",
+        "Interpreting image",
+    ]

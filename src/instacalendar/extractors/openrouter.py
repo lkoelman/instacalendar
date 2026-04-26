@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import mimetypes
 from base64 import b64encode
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -27,14 +28,26 @@ class OpenRouterExtractor:
         self.vision_model = vision_model
         self.client = client or httpx.Client(timeout=60)
 
-    def extract(self, post: InstagramPost) -> ExtractionResult:
+    def extract(
+        self,
+        post: InstagramPost,
+        *,
+        status_callback: Callable[[str], None] | None = None,
+    ) -> ExtractionResult:
+        if status_callback:
+            status_callback("Interpreting post text")
         result = self._call_model(post, self.text_model, include_images=False)
         if result.status == "event" and result.events and min(
             (event.confidence or result.confidence or 0) for event in result.events
         ) >= 0.7:
             return result
         if post.images:
+            if status_callback:
+                status_callback("Falling back to image")
+                status_callback("Interpreting image")
             return self._call_model(post, self.vision_model, include_images=True)
+        if status_callback:
+            status_callback("No image fallback available")
         return result
 
     def _call_model(

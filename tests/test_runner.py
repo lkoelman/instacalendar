@@ -41,10 +41,23 @@ class FakePrompt:
 class FakeProgress:
     def __init__(self) -> None:
         self.messages: list[str] = []
+        self.tasks: list[tuple[str, int]] = []
+        self.task_updates: list[str] = []
+        self.task_advances = 0
 
     def status(self, message: str):
         self.messages.append(message)
         return self
+
+    def task(self, description: str, *, total: int):
+        self.tasks.append((description, total))
+        return self
+
+    def update(self, message: str) -> None:
+        self.task_updates.append(message)
+
+    def advance(self) -> None:
+        self.task_advances += 1
 
     def __enter__(self):
         return self
@@ -128,7 +141,12 @@ def test_run_reports_progress_for_instagram_extraction_and_export(
             ]
 
     fake_extractor = Mock()
-    fake_extractor.extract.return_value = ExtractionResult(status="not_event")
+
+    def fake_extract(post: InstagramPost, *, status_callback):
+        status_callback("Interpreting post text")
+        return ExtractionResult(status="not_event")
+
+    fake_extractor.extract.side_effect = fake_extract
     fake_exporter = Mock()
     fake_exporter.export.return_value = []
 
@@ -151,9 +169,13 @@ def test_run_reports_progress_for_instagram_extraction_and_export(
         "Fetching collections ...",
         "Fetching posts from Concerts ...",
         "Caching posts from Concerts ...",
-        "Extracting event data from post 1/1 ...",
         "Exporting approved events to ICS ...",
     ]
+    assert progress.tasks == [("Processing posts", 1)]
+    assert progress.task_updates == ["Post 1/1: Interpreting post text"]
+    assert progress.task_advances == 1
+    fake_extractor.extract.assert_called_once()
+    assert fake_extractor.extract.call_args.kwargs["status_callback"] is not None
 
     assert runner.cache.load_cached_posts("Concerts")[0].media_pk == "1"
 

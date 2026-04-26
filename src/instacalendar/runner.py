@@ -33,10 +33,39 @@ class Prompt(Protocol):
 class Progress(Protocol):
     def status(self, message: str) -> AbstractContextManager[object]: ...
 
+    def task(self, description: str, *, total: int) -> ProgressTask: ...
+
+
+class ProgressTask(Protocol):
+    def __enter__(self) -> ProgressTask: ...
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None: ...
+
+    def update(self, message: str) -> None: ...
+
+    def advance(self) -> None: ...
+
 
 class NullProgress:
     def status(self, message: str) -> AbstractContextManager[object]:
         return nullcontext()
+
+    def task(self, description: str, *, total: int) -> ProgressTask:
+        return NullProgressTask()
+
+
+class NullProgressTask:
+    def __enter__(self) -> NullProgressTask:
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        return None
+
+    def update(self, message: str) -> None:
+        return None
+
+    def advance(self) -> None:
+        return None
 
 
 @dataclass(frozen=True)
@@ -157,29 +186,34 @@ class AppRunner:
             vision_model=config.openrouter_vision_model or "",
         )
         approved: list[tuple[str, EventDraft, str, int]] = []
-        for post_number, post in enumerate(posts, start=1):
-            with self.progress.status(
-                f"Extracting event data from post {post_number}/{len(posts)} ..."
-            ):
-                result = extractor.extract(post)
-            for index, draft in enumerate(result.events):
-                uid = self.cache.stable_uid(
-                    post.media_pk,
-                    index,
-                    draft.title,
-                    draft.start.isoformat() if draft.start else "",
-                )
-                export_destination = destination or config.default_export
-                destination_id = str(ics_output) if export_destination == "ics" else (
-                    config.google_calendar_id or "primary"
-                )
-                if self.cache.has_export(uid, export_destination, destination_id):
-                    continue
-                if self._review(draft):
-                    self.cache.record_review(post.media_pk, index, "approved", uid)
-                    approved.append((uid, draft, post.media_pk, index))
-                else:
-                    self.cache.record_review(post.media_pk, index, "skipped", uid)
+        with self.progress.task("Processing posts", total=len(posts)) as progress_task:
+            for post_number, post in enumerate(posts, start=1):
+
+                def report_extraction_status(
+                    message: str, *, post_number: int = post_number
+                ) -> None:
+                    progress_task.update(f"Post {post_number}/{len(posts)}: {message}")
+
+                result = extractor.extract(post, status_callback=report_extraction_status)
+                progress_task.advance()
+                for index, draft in enumerate(result.events):
+                    uid = self.cache.stable_uid(
+                        post.media_pk,
+                        index,
+                        draft.title,
+                        draft.start.isoformat() if draft.start else "",
+                    )
+                    export_destination = destination or config.default_export
+                    destination_id = str(ics_output) if export_destination == "ics" else (
+                        config.google_calendar_id or "primary"
+                    )
+                    if self.cache.has_export(uid, export_destination, destination_id):
+                        continue
+                    if self._review(draft):
+                        self.cache.record_review(post.media_pk, index, "approved", uid)
+                        approved.append((uid, draft, post.media_pk, index))
+                    else:
+                        self.cache.record_review(post.media_pk, index, "skipped", uid)
 
         export_destination = destination or config.default_export
         exported_count = 0
