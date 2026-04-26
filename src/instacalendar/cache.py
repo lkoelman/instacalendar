@@ -7,7 +7,14 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from instacalendar.models import ImageReference, InstagramPost, VideoReference
+from instacalendar.models import (
+    ExtractionResult,
+    ImageReference,
+    InstagramPost,
+    VideoReference,
+)
+
+EVENT_CACHE_KEYS = {"post", "post,media", "model", "model,media"}
 
 
 @dataclass(frozen=True)
@@ -129,10 +136,100 @@ class Cache:
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS cached_extractions (
+                    media_pk TEXT NOT NULL,
+                    model_signature TEXT NOT NULL,
+                    source_media_kind TEXT NOT NULL,
+                    result_json TEXT NOT NULL,
+                    extracted_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (media_pk, model_signature, source_media_kind)
+                )
+                """
+            )
 
     def stable_uid(self, media_pk: str, event_index: int, title: str, start: str) -> str:
         digest = hashlib.sha256(f"{media_pk}|{event_index}|{title}|{start}".encode()).hexdigest()
         return f"instacalendar-{digest[:32]}@instacalendar"
+
+    def extraction_model_signature(
+        self, *, text_model: str, vision_model: str, video_model: str
+    ) -> str:
+        return json.dumps(
+            {
+                "text": text_model,
+                "vision": vision_model,
+                "video": video_model,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+    def record_extraction_result(
+        self,
+        *,
+        media_pk: str,
+        model_signature: str,
+        source_media_kind: str,
+        result: ExtractionResult,
+        extracted_at: datetime,
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO cached_extractions (
+                    media_pk, model_signature, source_media_kind, result_json, extracted_at
+                )
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(media_pk, model_signature, source_media_kind) DO UPDATE SET
+                    result_json = excluded.result_json,
+                    extracted_at = excluded.extracted_at,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    media_pk,
+                    model_signature,
+                    source_media_kind,
+                    result.model_dump_json(),
+                    extracted_at.isoformat(),
+                ),
+            )
+
+    def get_extraction_result(
+        self,
+        *,
+        media_pk: str,
+        model_signature: str,
+        source_media_kind: str,
+        event_cache_key: str,
+    ) -> ExtractionResult | None:
+        if event_cache_key not in EVENT_CACHE_KEYS:
+            raise ValueError(f"Unsupported event cache key: {event_cache_key}")
+        clauses = ["media_pk = ?"]
+        params: list[str] = [media_pk]
+        if "model" in event_cache_key:
+            clauses.append("model_signature = ?")
+            params.append(model_signature)
+        if "media" in event_cache_key:
+            clauses.append("source_media_kind = ?")
+            params.append(source_media_kind)
+        where = " AND ".join(clauses)
+        with self._connect() as conn:
+            row = conn.execute(
+                f"""
+                SELECT result_json
+                FROM cached_extractions
+                WHERE {where}
+                ORDER BY extracted_at DESC
+                LIMIT 1
+                """,
+                params,
+            ).fetchone()
+        if row is None:
+            return None
+        return ExtractionResult.model_validate_json(row[0])
 
     def record_review(self, media_pk: str, event_index: int, decision: str, uid: str) -> None:
         with self._connect() as conn:

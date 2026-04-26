@@ -3,7 +3,13 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from instacalendar.cache import Cache, CachedMedia
-from instacalendar.models import ImageReference, InstagramPost, VideoReference
+from instacalendar.models import (
+    EventDraft,
+    ExtractionResult,
+    ImageReference,
+    InstagramPost,
+    VideoReference,
+)
 
 
 def test_cache_records_review_and_export_idempotently(tmp_path: Path) -> None:
@@ -199,3 +205,101 @@ def test_cache_info_summarizes_files_and_size_by_collection(tmp_path: Path) -> N
     ]
     assert info.collections[1].file_counts == {"image": 1, "video": 1}
     assert info.collections[1].missing_media_count == 1
+
+
+def test_cache_round_trips_extraction_results_by_default_model_media_key(
+    tmp_path: Path,
+) -> None:
+    cache = Cache(tmp_path / "cache.sqlite3")
+    cache.initialize()
+    model_signature = cache.extraction_model_signature(
+        text_model="text",
+        vision_model="vision",
+        video_model="video",
+    )
+    result = ExtractionResult(
+        status="event",
+        events=[
+            EventDraft(
+                title="Club Night",
+                start=datetime(2026, 5, 3, 20, 0, tzinfo=ZoneInfo("UTC")),
+            )
+        ],
+        model_ids=["text"],
+        confidence=0.9,
+    )
+
+    cache.record_extraction_result(
+        media_pk="media-1",
+        model_signature=model_signature,
+        source_media_kind="text",
+        result=result,
+        extracted_at=datetime(2026, 4, 26, 12, 0, tzinfo=ZoneInfo("UTC")),
+    )
+
+    assert (
+        cache.get_extraction_result(
+            media_pk="media-1",
+            model_signature=model_signature,
+            source_media_kind="text",
+            event_cache_key="model,media",
+        )
+        == result
+    )
+    assert (
+        cache.get_extraction_result(
+            media_pk="media-1",
+            model_signature=model_signature,
+            source_media_kind="image",
+            event_cache_key="model,media",
+        )
+        is None
+    )
+
+
+def test_cache_extraction_key_modes_control_model_and_media_matching(tmp_path: Path) -> None:
+    cache = Cache(tmp_path / "cache.sqlite3")
+    cache.initialize()
+    original_signature = cache.extraction_model_signature(
+        text_model="text-v1",
+        vision_model="vision-v1",
+        video_model="vision-v1",
+    )
+    new_signature = cache.extraction_model_signature(
+        text_model="text-v2",
+        vision_model="vision-v1",
+        video_model="vision-v1",
+    )
+    result = ExtractionResult(status="not_event", model_ids=["text-v1"])
+    cache.record_extraction_result(
+        media_pk="media-1",
+        model_signature=original_signature,
+        source_media_kind="image",
+        result=result,
+        extracted_at=datetime(2026, 4, 26, 12, 0, tzinfo=ZoneInfo("UTC")),
+    )
+
+    assert cache.get_extraction_result(
+        media_pk="media-1",
+        model_signature=new_signature,
+        source_media_kind="image",
+        event_cache_key="post,media",
+    ) == result
+    assert cache.get_extraction_result(
+        media_pk="media-1",
+        model_signature=original_signature,
+        source_media_kind="video",
+        event_cache_key="model",
+    ) == result
+    assert cache.get_extraction_result(
+        media_pk="media-1",
+        model_signature=new_signature,
+        source_media_kind="video",
+        event_cache_key="post",
+    ) == result
+    assert cache.get_extraction_result(
+        media_pk="media-1",
+        model_signature=new_signature,
+        source_media_kind="image",
+        event_cache_key="model,media",
+    ) is None

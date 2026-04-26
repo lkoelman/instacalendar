@@ -207,6 +207,40 @@ def test_cli_run_passes_from_cache_to_runner(monkeypatch) -> None:
     assert calls[0]["collection"] == "Concerts"
 
 
+def test_cli_run_passes_event_cache_options_to_runner(monkeypatch) -> None:
+    calls = []
+
+    class FakeAppRunner:
+        def __init__(self, *args, **kwargs) -> None:
+            return None
+
+        def run(self, **kwargs) -> RunSummary:
+            calls.append(kwargs)
+            return RunSummary(
+                processed_posts=1,
+                approved_events=0,
+                exported_events=0,
+                destination="events.ics",
+            )
+
+    monkeypatch.setattr("instacalendar.cli.AppRunner", FakeAppRunner)
+
+    result = CliRunner().invoke(
+        app,
+        ["run", "--ignore-event-cache", "--event-cache-key", "post,media"],
+    )
+
+    assert result.exit_code == 0
+    assert calls[0]["ignore_event_cache"] is True
+    assert calls[0]["event_cache_key"] == "post,media"
+
+
+def test_cli_run_rejects_invalid_event_cache_key() -> None:
+    result = CliRunner().invoke(app, ["run", "--event-cache-key", "media"])
+
+    assert result.exit_code != 0
+
+
 def test_cli_default_command_passes_post_filters_to_runner(monkeypatch) -> None:
     calls = []
 

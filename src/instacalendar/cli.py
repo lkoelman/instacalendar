@@ -11,7 +11,7 @@ from rich.console import Console
 from rich.progress import BarColumn, Progress, TaskID, TextColumn, TimeElapsedColumn
 from rich.table import Table
 
-from instacalendar.cache import Cache
+from instacalendar.cache import EVENT_CACHE_KEYS, Cache
 from instacalendar.config import AppPaths
 from instacalendar.runner import AppRunner
 
@@ -174,13 +174,33 @@ def run(
         bool,
         typer.Option("--from-cache", help="Use cached posts instead of fetching Instagram"),
     ] = False,
+    ignore_event_cache: Annotated[
+        bool,
+        typer.Option(
+            "--ignore-event-cache",
+            help="Reprocess posts instead of reusing cached extraction results",
+        ),
+    ] = False,
+    event_cache_key: Annotated[
+        str,
+        typer.Option(
+            "--event-cache-key",
+            help="Cache hit policy: post, post,media, model, or model,media",
+        ),
+    ] = "model,media",
 ) -> None:
+    if event_cache_key not in EVENT_CACHE_KEYS:
+        raise typer.BadParameter(
+            "event cache key must be one of: post, post,media, model, model,media"
+        )
     summary = AppRunner(_paths(), QuestionaryPrompt(), progress=RichProgress()).run(
         collection=collection,
         ics_output=ics_output,
         posted_since=posted_since,
         limit=limit,
         from_cache=from_cache,
+        ignore_event_cache=ignore_event_cache,
+        event_cache_key=event_cache_key,
     )
     console.print(
         f"Exported {summary.exported_events} events from {summary.processed_posts} posts "

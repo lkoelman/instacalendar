@@ -1,0 +1,4 @@
+When running the event extraction pipeline (`instacalendar run`), and the pipeline fails for some reason, we currently have to retry from the beginning. Instead, we want the extraction pipeline to be resumable. Each extracted event should be saved to the cache. When running a pipeline that includes Instagram posts that were  already processed, it should re-use the cached results, but only if they were extracted using the same OpenRouter models. Add the following additional flags to the CLI:
+
+- `--ignore-event-cache` : don't reuse the cache of extracted events - instead, reprocess the posts
+- `--event-cache-key post[,media]|model[,media]` : configure what constitutes a 'cache hit': the same post (ignoring the model used for extraction) and media type used for the successful extraction (text/image/video), or the post + model used and media used

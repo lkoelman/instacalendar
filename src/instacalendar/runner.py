@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from instacalendar.cache import Cache, CachedMedia
+from instacalendar.cache import EVENT_CACHE_KEYS, Cache, CachedMedia
 from instacalendar.config import AppConfig, AppPaths, ConfigStore
 from instacalendar.exporters.google import GoogleCalendarExporter
 from instacalendar.exporters.ics import IcsExporter
@@ -146,7 +146,11 @@ class AppRunner:
         posted_since: date | None = None,
         limit: int | None = None,
         from_cache: bool = False,
+        ignore_event_cache: bool = False,
+        event_cache_key: str = "model,media",
     ) -> RunSummary:
+        if event_cache_key not in EVENT_CACHE_KEYS:
+            raise ValueError(f"Unsupported event cache key: {event_cache_key}")
         with self.progress.status("Initializing cache ..."):
             self.cache.initialize()
         with self.progress.status("Loading configuration ..."):
@@ -193,11 +197,19 @@ class AppRunner:
             with self.progress.status(f"Caching posts from {collection} ..."):
                 posts = self._cache_posts(collection or "", posts)
 
+        text_model = config.openrouter_text_model or ""
+        vision_model = config.openrouter_vision_model or ""
+        video_model = config.openrouter_video_model or config.openrouter_vision_model or ""
+        model_signature = self.cache.extraction_model_signature(
+            text_model=text_model,
+            vision_model=vision_model,
+            video_model=video_model,
+        )
         extractor = OpenRouterExtractor(
             api_key=api_key or "",
-            text_model=config.openrouter_text_model or "",
-            vision_model=config.openrouter_vision_model or "",
-            video_model=config.openrouter_video_model or config.openrouter_vision_model or "",
+            text_model=text_model,
+            vision_model=vision_model,
+            video_model=video_model,
         )
         approved: list[tuple[str, EventDraft, str, int]] = []
         with self.progress.task("Processing posts", total=len(posts)) as progress_task:
@@ -213,7 +225,22 @@ class AppRunner:
                     statuses.append(message)
                     progress_task.update(f"Post {post_number}/{len(posts)}: {message}")
 
-                result = extractor.extract(post, status_callback=report_extraction_status)
+                result = None
+                if not ignore_event_cache:
+                    result = self._cached_extraction_result(
+                        post,
+                        model_signature=model_signature,
+                        event_cache_key=event_cache_key,
+                    )
+                if result is None:
+                    result = extractor.extract(post, status_callback=report_extraction_status)
+                    self.cache.record_extraction_result(
+                        media_pk=post.media_pk,
+                        model_signature=model_signature,
+                        source_media_kind=self._extraction_source(extraction_statuses),
+                        result=result,
+                        extracted_at=datetime.now(UTC),
+                    )
                 progress_task.report(
                     self._post_extraction_summary(post, result, extraction_statuses)
                 )
@@ -313,6 +340,24 @@ class AppRunner:
         if "Interpreting image" in extraction_statuses:
             return "image"
         return "text"
+
+    def _cached_extraction_result(
+        self,
+        post: InstagramPost,
+        *,
+        model_signature: str,
+        event_cache_key: str,
+    ) -> ExtractionResult | None:
+        for source_media_kind in ("text", "image", "video"):
+            result = self.cache.get_extraction_result(
+                media_pk=post.media_pk,
+                model_signature=model_signature,
+                source_media_kind=source_media_kind,
+                event_cache_key=event_cache_key,
+            )
+            if result is not None:
+                return result
+        return None
 
     def _event_summary(self, draft: EventDraft) -> str:
         event_date = draft.start.date().isoformat() if draft.start else "date unknown"

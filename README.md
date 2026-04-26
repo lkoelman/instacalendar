@@ -73,11 +73,22 @@ Run a configured collection directly:
 uv run instacalendar run --collection "Concerts" --ics-output events.ics
 ```
 
-During extraction, the CLI shows a post progress meter and status messages such
-as `Interpreting post text`, `Falling back to image`, `Interpreting image`, and
-`Interpreting video`.
-After each post, it prints a persistent summary bullet with the poster, post
-date, extraction outcome, and inferred event date/location.
+Extracted event results are cached locally as each post is processed, so a
+failed or interrupted run can resume without sending already processed posts
+back to OpenRouter when the configured model set still matches. To force a fresh
+extraction pass, use:
+
+```bash
+uv run instacalendar run --collection "Concerts" --ignore-event-cache
+```
+
+By default, cache hits require the same post, same configured OpenRouter model
+set, and same extraction source type (`text`, `image`, or `video`). You can
+relax matching when needed:
+
+```bash
+uv run instacalendar run --collection "Concerts" --event-cache-key post,media
+```
 
 Retry extraction/export from posts already saved in the local cache:
 
@@ -111,9 +122,10 @@ Instagram captions, post metadata, image content, and cached local video content
 for posts being processed may be sent to OpenRouter for extraction. Remote
 Instagram video URLs are not sent when the local video download failed. Google
 Calendar export sends approved event details to Google. The local cache stores
-post metadata, downloaded image and video files, review decisions, and export
-records so reruns can retry extraction without contacting Instagram and avoid
-duplicate exports.
+post metadata, downloaded image and video files, extracted event results, review
+decisions, and export records so reruns can resume extraction/export without
+contacting Instagram unnecessarily, avoid repeated OpenRouter calls for matching
+posts, and avoid duplicate exports.
 
 ## Test And Lint
 

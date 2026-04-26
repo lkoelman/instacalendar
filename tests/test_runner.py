@@ -704,3 +704,298 @@ def test_run_from_cache_fails_when_collection_has_no_posts(tmp_path: Path) -> No
         assert "No cached posts found" in str(error)
     else:
         raise AssertionError("expected RuntimeError")
+
+
+def test_run_reuses_cached_extraction_result_without_calling_openrouter(
+    tmp_path: Path, monkeypatch
+) -> None:
+    runner = AppRunner(AppPaths.from_base(tmp_path), FakePrompt(confirm_answer=True))
+    runner.configure(
+        instagram_username="musicfan",
+        instagram_password="instagram-secret",
+        openrouter_api_key="openrouter-secret",
+        openrouter_text_model="text",
+        openrouter_vision_model="vision",
+    )
+    runner.cache.initialize()
+    model_signature = runner.cache.extraction_model_signature(
+        text_model="text",
+        vision_model="vision",
+        video_model="vision",
+    )
+    runner.cache.record_extraction_result(
+        media_pk="1",
+        model_signature=model_signature,
+        source_media_kind="text",
+        result=ExtractionResult(
+            status="event",
+            events=[
+                EventDraft(
+                    title="Cached Show",
+                    start=datetime(2026, 5, 3, 20, 0, tzinfo=UTC),
+                )
+            ],
+            model_ids=["text"],
+        ),
+        extracted_at=datetime(2026, 4, 26, 12, 0, tzinfo=UTC),
+    )
+
+    class FakeInstagramClient:
+        def __init__(self, username: str, password: str, session_file: Path) -> None:
+            return None
+
+        def authenticate(self) -> None:
+            return None
+
+        def list_collections(self) -> list[str]:
+            return ["Concerts"]
+
+        def fetch_collection_posts(self, collection_name: str) -> list[InstagramPost]:
+            return [InstagramPost(media_pk="1", caption="Live Set", media_kind="image")]
+
+    fake_extractor = Mock()
+    fake_exporter = Mock()
+    fake_exporter.export.return_value = []
+    monkeypatch.setattr("instacalendar.runner.LiveInstagramClient", FakeInstagramClient)
+    monkeypatch.setattr(
+        "instacalendar.runner.OpenRouterExtractor",
+        lambda **kwargs: fake_extractor,
+    )
+    monkeypatch.setattr("instacalendar.runner.IcsExporter", lambda: fake_exporter)
+
+    summary = runner.run(ics_output=tmp_path / "events.ics")
+
+    fake_extractor.extract.assert_not_called()
+    assert summary.exported_events == 1
+
+
+def test_run_ignore_event_cache_forces_extraction_and_updates_cache(
+    tmp_path: Path, monkeypatch
+) -> None:
+    runner = AppRunner(AppPaths.from_base(tmp_path), FakePrompt(confirm_answer=True))
+    runner.configure(
+        instagram_username="musicfan",
+        instagram_password="instagram-secret",
+        openrouter_api_key="openrouter-secret",
+        openrouter_text_model="text",
+        openrouter_vision_model="vision",
+    )
+    runner.cache.initialize()
+    model_signature = runner.cache.extraction_model_signature(
+        text_model="text",
+        vision_model="vision",
+        video_model="vision",
+    )
+    runner.cache.record_extraction_result(
+        media_pk="1",
+        model_signature=model_signature,
+        source_media_kind="text",
+        result=ExtractionResult(status="not_event", model_ids=["text"]),
+        extracted_at=datetime(2026, 4, 26, 12, 0, tzinfo=UTC),
+    )
+
+    class FakeInstagramClient:
+        def __init__(self, username: str, password: str, session_file: Path) -> None:
+            return None
+
+        def authenticate(self) -> None:
+            return None
+
+        def list_collections(self) -> list[str]:
+            return ["Concerts"]
+
+        def fetch_collection_posts(self, collection_name: str) -> list[InstagramPost]:
+            return [InstagramPost(media_pk="1", caption="Live Set", media_kind="image")]
+
+    fake_extractor = Mock()
+
+    def fake_extract(post: InstagramPost, *, status_callback):
+        status_callback("Interpreting post text")
+        status_callback("Falling back to image")
+        status_callback("Interpreting image")
+        return ExtractionResult(
+            status="event",
+            events=[
+                EventDraft(
+                    title="Fresh Show",
+                    start=datetime(2026, 5, 4, 20, 0, tzinfo=UTC),
+                )
+            ],
+            model_ids=["vision"],
+        )
+
+    fake_extractor.extract.side_effect = fake_extract
+    monkeypatch.setattr("instacalendar.runner.LiveInstagramClient", FakeInstagramClient)
+    monkeypatch.setattr(
+        "instacalendar.runner.OpenRouterExtractor",
+        lambda **kwargs: fake_extractor,
+    )
+    monkeypatch.setattr("instacalendar.runner.IcsExporter", lambda: Mock(export=Mock()))
+
+    runner.run(ics_output=tmp_path / "events.ics", ignore_event_cache=True)
+
+    fake_extractor.extract.assert_called_once()
+    cached = runner.cache.get_extraction_result(
+        media_pk="1",
+        model_signature=model_signature,
+        source_media_kind="image",
+        event_cache_key="model,media",
+    )
+    assert cached is not None
+    assert cached.events[0].title == "Fresh Show"
+
+
+def test_run_default_event_cache_key_misses_when_models_change(
+    tmp_path: Path, monkeypatch
+) -> None:
+    runner = AppRunner(AppPaths.from_base(tmp_path), FakePrompt(confirm_answer=True))
+    runner.configure(
+        instagram_username="musicfan",
+        instagram_password="instagram-secret",
+        openrouter_api_key="openrouter-secret",
+        openrouter_text_model="text-v2",
+        openrouter_vision_model="vision",
+    )
+    runner.cache.initialize()
+    old_signature = runner.cache.extraction_model_signature(
+        text_model="text-v1",
+        vision_model="vision",
+        video_model="vision",
+    )
+    runner.cache.record_extraction_result(
+        media_pk="1",
+        model_signature=old_signature,
+        source_media_kind="text",
+        result=ExtractionResult(status="not_event", model_ids=["text-v1"]),
+        extracted_at=datetime(2026, 4, 26, 12, 0, tzinfo=UTC),
+    )
+
+    class FakeInstagramClient:
+        def __init__(self, username: str, password: str, session_file: Path) -> None:
+            return None
+
+        def authenticate(self) -> None:
+            return None
+
+        def list_collections(self) -> list[str]:
+            return ["Concerts"]
+
+        def fetch_collection_posts(self, collection_name: str) -> list[InstagramPost]:
+            return [InstagramPost(media_pk="1", caption="Live Set", media_kind="image")]
+
+    fake_extractor = Mock()
+    fake_extractor.extract.return_value = ExtractionResult(
+        status="not_event", model_ids=["text-v2"]
+    )
+    monkeypatch.setattr("instacalendar.runner.LiveInstagramClient", FakeInstagramClient)
+    monkeypatch.setattr(
+        "instacalendar.runner.OpenRouterExtractor",
+        lambda **kwargs: fake_extractor,
+    )
+    monkeypatch.setattr("instacalendar.runner.IcsExporter", lambda: Mock(export=Mock()))
+
+    runner.run(ics_output=tmp_path / "events.ics")
+
+    fake_extractor.extract.assert_called_once()
+
+
+def test_run_post_media_event_cache_key_reuses_across_model_changes(
+    tmp_path: Path, monkeypatch
+) -> None:
+    runner = AppRunner(AppPaths.from_base(tmp_path), FakePrompt(confirm_answer=True))
+    runner.configure(
+        instagram_username="musicfan",
+        instagram_password="instagram-secret",
+        openrouter_api_key="openrouter-secret",
+        openrouter_text_model="text-v2",
+        openrouter_vision_model="vision",
+    )
+    runner.cache.initialize()
+    old_signature = runner.cache.extraction_model_signature(
+        text_model="text-v1",
+        vision_model="vision",
+        video_model="vision",
+    )
+    runner.cache.record_extraction_result(
+        media_pk="1",
+        model_signature=old_signature,
+        source_media_kind="text",
+        result=ExtractionResult(status="not_event", model_ids=["text-v1"]),
+        extracted_at=datetime(2026, 4, 26, 12, 0, tzinfo=UTC),
+    )
+
+    class FakeInstagramClient:
+        def __init__(self, username: str, password: str, session_file: Path) -> None:
+            return None
+
+        def authenticate(self) -> None:
+            return None
+
+        def list_collections(self) -> list[str]:
+            return ["Concerts"]
+
+        def fetch_collection_posts(self, collection_name: str) -> list[InstagramPost]:
+            return [InstagramPost(media_pk="1", caption="Live Set", media_kind="image")]
+
+    fake_extractor = Mock()
+    monkeypatch.setattr("instacalendar.runner.LiveInstagramClient", FakeInstagramClient)
+    monkeypatch.setattr(
+        "instacalendar.runner.OpenRouterExtractor",
+        lambda **kwargs: fake_extractor,
+    )
+    monkeypatch.setattr("instacalendar.runner.IcsExporter", lambda: Mock(export=Mock()))
+
+    runner.run(ics_output=tmp_path / "events.ics", event_cache_key="post,media")
+
+    fake_extractor.extract.assert_not_called()
+
+
+def test_run_does_not_cache_extraction_failures(tmp_path: Path, monkeypatch) -> None:
+    runner = AppRunner(AppPaths.from_base(tmp_path), FakePrompt(confirm_answer=True))
+    runner.configure(
+        instagram_username="musicfan",
+        instagram_password="instagram-secret",
+        openrouter_api_key="openrouter-secret",
+        openrouter_text_model="text",
+        openrouter_vision_model="vision",
+    )
+
+    class FakeInstagramClient:
+        def __init__(self, username: str, password: str, session_file: Path) -> None:
+            return None
+
+        def authenticate(self) -> None:
+            return None
+
+        def list_collections(self) -> list[str]:
+            return ["Concerts"]
+
+        def fetch_collection_posts(self, collection_name: str) -> list[InstagramPost]:
+            return [InstagramPost(media_pk="1", caption="Live Set", media_kind="image")]
+
+    fake_extractor = Mock()
+    fake_extractor.extract.side_effect = RuntimeError("OpenRouter failed")
+    monkeypatch.setattr("instacalendar.runner.LiveInstagramClient", FakeInstagramClient)
+    monkeypatch.setattr(
+        "instacalendar.runner.OpenRouterExtractor",
+        lambda **kwargs: fake_extractor,
+    )
+
+    try:
+        runner.run(ics_output=tmp_path / "events.ics")
+    except RuntimeError as error:
+        assert "OpenRouter failed" in str(error)
+    else:
+        raise AssertionError("expected RuntimeError")
+
+    model_signature = runner.cache.extraction_model_signature(
+        text_model="text",
+        vision_model="vision",
+        video_model="vision",
+    )
+    assert runner.cache.get_extraction_result(
+        media_pk="1",
+        model_signature=model_signature,
+        source_media_kind="text",
+        event_cache_key="model,media",
+    ) is None

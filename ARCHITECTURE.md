@@ -103,14 +103,16 @@ Key technologies: keyring, JSON fallback storage.
 
 ### `src/instacalendar/cache.py`
 
-Provides local SQLite persistence for cached posts, cached media metadata, review decisions, and export records. It creates four tables:
+Provides local SQLite persistence for cached posts, cached media metadata, extracted event results, review decisions, and export records. It creates five tables:
 
 - `reviews(media_pk, event_index, decision, uid, reviewed_at)`
 - `exports(uid, media_pk, event_index, destination_kind, destination_id, remote_event_id, exported_at)`
 - `cached_posts(collection_name, media_pk, post_json, fetched_at)`
 - `cached_media(collection_name, media_pk, media_kind, media_index, source_url, local_path, status, error)`
+- `cached_extractions(media_pk, model_signature, source_media_kind, result_json, extracted_at, updated_at)`
 
 `stable_uid()` derives deterministic event UIDs from Instagram media PK, event index, title, and start value. `has_export()` prevents reruns from exporting the same UID to the same destination. Cached posts can be listed by collection, summarized by storage usage, and loaded back into `InstagramPost` objects for `--from-cache` runs.
+Cached extraction results are keyed by post, configured OpenRouter model set, and extraction source type (`text`, `image`, or `video`), with runner-controlled matching modes for looser reuse when requested.
 
 Key technologies: SQLite, SHA-256 stable IDs.
 
@@ -169,11 +171,12 @@ Key technologies: google-auth-oauthlib, google-api-python-client.
 4. If no collection was passed, Instagram collection names are fetched and the user selects one.
 5. Posts are fetched, normalized to `InstagramPost`, optionally filtered by `--posted-since`, then capped by `--limit`.
 6. Selected posts are stored in SQLite and their image/video media are downloaded under the app data media directory.
-7. Each post is sent to `OpenRouterExtractor.extract()` using local cached images and videos where available.
-8. Each returned `EventDraft` receives a stable UID and is skipped if the cache already has an export for the chosen destination.
-9. Exportable drafts are shown to the user for approve/skip review.
-10. Approved drafts are exported to `.ics` or Google Calendar.
-11. Each export is recorded in SQLite using `(uid, destination_kind, destination_id)` as the idempotency key.
+7. Before extraction, the runner checks `cached_extractions` unless `--ignore-event-cache` is set. The default hit policy requires the same post, configured OpenRouter model set, and extraction source type.
+8. Cache misses are sent to `OpenRouterExtractor.extract()` using local cached images and videos where available, then the structured `ExtractionResult` is saved immediately.
+9. Each returned `EventDraft` receives a stable UID and is skipped if the cache already has an export for the chosen destination.
+10. Exportable drafts are shown to the user for approve/skip review.
+11. Approved drafts are exported to `.ics` or Google Calendar.
+12. Each export is recorded in SQLite using `(uid, destination_kind, destination_id)` as the idempotency key.
 
 ### Cached Run Flow
 
@@ -192,7 +195,7 @@ There is no asynchronous job queue, pub/sub system, server process, or backgroun
 
 - `instacalendar`: runs the guided wizard, including setup and export.
 - `instacalendar auth`: saves Instagram, OpenRouter, export, and optional Google calendar settings.
-- `instacalendar run`: executes export with saved configuration and optional `--collection`, `--ics-output`, `--posted-since`, `--limit`, and `--from-cache`.
+- `instacalendar run`: executes export with saved configuration and optional `--collection`, `--ics-output`, `--posted-since`, `--limit`, `--from-cache`, `--ignore-event-cache`, and `--event-cache-key`.
 - `instacalendar cache list-events`: prints recorded exports.
 - `instacalendar cache list-posts`: prints cached posts in a multi-column table.
 - `instacalendar cache info`: prints cache locations, total storage, and per-collection file counts/storage.
@@ -223,6 +226,7 @@ No webhooks or inbound network API are exposed by this application. The only lis
 - Instagram session at rest: `instagrapi` settings JSON in `AppPaths.instagram_session_file`.
 - Google token at rest: OAuth authorized-user JSON in `AppPaths.google_token_file`.
 - Cache at rest: SQLite database in `AppPaths.cache_file`.
+- Extraction cache records at rest: structured `ExtractionResult` JSON keyed by post, model signature, and source media kind.
 - Cached media at rest: files under `AppPaths.media_dir`.
 - OpenRouter requests: HTTPS JSON chat completion payloads with text-only, image, or video message content.
 - OpenRouter responses: JSON string in `choices[0].message.content`, parsed into `ExtractionResult`.
@@ -255,7 +259,7 @@ The CLI shows user-facing progress with Rich status messages and a determinate p
 
 Secrets are stored in OS keyring when possible, with a plaintext JSON fallback if keyring access fails. The README discloses that Instagram captions, post metadata, and image content for processed posts are sent to OpenRouter, and approved event details are sent to Google when Google export is used.
 
-The app does not store OpenRouter raw responses. It does store cached post metadata, downloaded Instagram media, local review and export metadata, Instagram session settings, and Google OAuth tokens under the user's app directories. Cached local video files may be encoded and sent to OpenRouter during video fallback; remote video URLs are not sent if the video was not cached locally.
+The app does not store OpenRouter raw responses. It does store cached post metadata, downloaded Instagram media, structured extracted event results, local review and export metadata, Instagram session settings, and Google OAuth tokens under the user's app directories. Cached local video files may be encoded and sent to OpenRouter during video fallback; remote video URLs are not sent if the video was not cached locally.
 
 ## Deployment & Infrastructure
 
@@ -274,12 +278,12 @@ Tests live in `tests/` and focus on adapter boundaries plus orchestration behavi
 
 - `test_models.py`: Pydantic validation, source URL derivation, and exportability rules.
 - `test_config.py`: app path overrides and config round trips.
-- `test_cache.py`: SQLite initialization, stable UID use, cached post/media round trips, cached post summaries, cache storage summaries, and export idempotency.
+- `test_cache.py`: SQLite initialization, stable UID use, cached post/media round trips, cached extraction round trips and matching modes, cached post summaries, cache storage summaries, and export idempotency.
 - `test_instagram.py`: image/video media mapping, paged collection fetches, partial failure behavior, and first-page failure errors.
 - `test_openrouter.py`: OpenRouter request headers/payloads, local cached image encoding, and JSON response parsing with `respx`.
 - `test_ics_exporter.py`: `.ics` UID, location, description, performers, and source URL output.
 - `test_google_exporter.py`: duplicate-safe Google Calendar event body construction.
-- `test_runner.py`: configuration prompts, environment key use, progress messages, post filtering, and limits with fake adapters.
+- `test_runner.py`: configuration prompts, environment key use, progress messages, post filtering, limits, and extraction-cache reuse with fake adapters.
 - `test_cli.py`: CLI command routing, cache behavior, auth config writes, and option validation.
 
 External services are mocked or faked. The current test suite does not perform live Instagram, OpenRouter, Google OAuth, Google Calendar, keyring, or full terminal interaction tests.
@@ -306,7 +310,7 @@ The implementation covers the core v1 flow, but several items from the initial p
 - OpenRouter model discovery and modality validation are not implemented; users provide model IDs directly.
 - OpenRouter response handling assumes valid JSON and does not retry malformed model output.
 - The extractor does not use a formal JSON Schema beyond `response_format={"type": "json_object"}`.
-- SQLite stores cached posts, cached media metadata, reviews, and exports, but not extraction attempts.
+- SQLite stores successful structured extraction results, but not failed extraction attempts or raw OpenRouter responses.
 - Google calendar selection or creation is not implemented; the app uses configured `google_calendar_id` or `primary`.
 - Instagram 2FA/challenge-specific prompt handling is not implemented directly; behavior depends on `instagrapi`.
 - Secret fallback storage is plaintext JSON, so environments without a working keyring have weaker local secret protection.
