@@ -49,10 +49,6 @@ class AppPaths(BaseModel):
     def google_token_file(self) -> Path:
         return self.data_dir / "google-token.json"
 
-    @property
-    def secret_fallback_file(self) -> Path:
-        return self.config_dir / "secrets.json"
-
 
 class AppConfig(BaseModel):
     instagram_username: str | None = None

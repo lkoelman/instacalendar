@@ -138,7 +138,7 @@ class AppRunner:
         self.prompt = prompt
         self.progress = progress or NullProgress()
         self.config_store = ConfigStore(paths)
-        self.secret_store = SecretStore(paths.secret_fallback_file)
+        self.secret_store = SecretStore()
         self.cache = Cache(paths.cache_file)
 
     def configure(
@@ -171,7 +171,7 @@ class AppRunner:
         self.config_store.save(config)
         self.secret_store.set(
             "instagram_password",
-            instagram_password or self.prompt.text("Instagram password", password=True),
+            self._resolve_instagram_password(instagram_password),
         )
         self.secret_store.set(
             "openrouter_api_key",
@@ -217,7 +217,7 @@ class AppRunner:
         else:
             password = self.secret_store.get("instagram_password")
             if not password:
-                password = self.prompt.text("Instagram password", password=True)
+                password = self._resolve_instagram_password(None)
                 self.secret_store.set("instagram_password", password)
             instagram = LiveInstagramClient(username, password, self.paths.instagram_session_file)
             with self.progress.status("Authenticating with Instagram ..."):
@@ -488,6 +488,16 @@ class AppRunner:
         ):
             return environment_api_key
         return self.prompt.text("OpenRouter API key", password=True)
+
+    def _resolve_instagram_password(self, explicit_password: str | None) -> str:
+        if explicit_password:
+            return explicit_password
+        environment_password = os.environ.get("INSTAGRAM_PASSWORD")
+        if environment_password and self.prompt.confirm(
+            "Use INSTAGRAM_PASSWORD from your environment?", default=True
+        ):
+            return environment_password
+        return self.prompt.text("Instagram password", password=True)
 
     def _cache_posts(self, collection_name: str, posts: list[InstagramPost]) -> list[InstagramPost]:
         cached_posts = []

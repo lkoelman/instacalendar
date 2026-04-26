@@ -32,7 +32,7 @@ graph LR
     CLI -->|"Prompt + Progress protocols"| Runner["instacalendar.runner.AppRunner"]
 
     Runner -->|"JSON config"| Config["config.ConfigStore"]
-    Runner -->|"keyring or secrets.json"| Secrets["secrets.SecretStore"]
+    Runner -->|"OS keyring"| Secrets["secrets.SecretStore"]
     Runner -->|"SQLite reads/writes"| Cache["cache.Cache"]
 
     Runner -->|"login, list collections, fetch paged media"| Instagram["instagram.LiveInstagramClient"]
@@ -95,11 +95,11 @@ Key technologies: platformdirs, Pydantic, JSON files.
 
 ### `src/instacalendar/secrets.py`
 
-Stores secret values behind a small `SecretStore` abstraction. It first tries the operating system keyring and falls back to a JSON file under the app config directory when keyring access fails.
+Stores secret values behind a small `SecretStore` abstraction. It uses the operating system keyring for persistent storage.
 
 Current secret keys are `instagram_password` and `openrouter_api_key`.
 
-Key technologies: keyring, JSON fallback storage.
+Key technologies: keyring.
 
 ### `src/instacalendar/cache.py`
 
@@ -222,7 +222,7 @@ No webhooks or inbound network API are exposed by this application. The only lis
 
 - CLI input: Typer options and Questionary interactive prompts.
 - Config at rest: JSON in `AppPaths.config_file`, usually `<config-dir>/config.json`.
-- Secret fallback at rest: JSON in `AppPaths.secret_fallback_file`, used only when keyring operations fail.
+- Secrets at rest: operating system keyring.
 - Instagram session at rest: `instagrapi` settings JSON in `AppPaths.instagram_session_file`.
 - Google token at rest: OAuth authorized-user JSON in `AppPaths.google_token_file`.
 - Cache at rest: SQLite database in `AppPaths.cache_file`.
@@ -257,7 +257,7 @@ The CLI shows user-facing progress with Rich status messages and a determinate p
 
 ### Security and Privacy
 
-Secrets are stored in OS keyring when possible, with a plaintext JSON fallback if keyring access fails. The README discloses that Instagram captions, post metadata, and image content for processed posts are sent to OpenRouter, and approved event details are sent to Google when Google export is used.
+Secrets are stored in the OS keyring. If `OPENROUTER_API_KEY` or `INSTAGRAM_PASSWORD` is set in the environment, the user is prompted to use it before a secret is requested or stored. The README discloses that Instagram captions, post metadata, and image content for processed posts are sent to OpenRouter, and approved event details are sent to Google when Google export is used.
 
 The app does not store OpenRouter raw responses. It does store cached post metadata, downloaded Instagram media, structured extracted event results, local review and export metadata, Instagram session settings, and Google OAuth tokens under the user's app directories. Cached local video files may be encoded and sent to OpenRouter during video fallback; remote video URLs are not sent if the video was not cached locally.
 
@@ -312,7 +312,6 @@ The implementation covers the core v1 flow, but several items from the initial p
 - SQLite stores successful structured extraction results, but not failed extraction attempts or raw OpenRouter responses.
 - Google calendar selection or creation is not implemented; the app uses configured `google_calendar_id` or `primary`.
 - Instagram 2FA/challenge-specific prompt handling is not implemented directly; behavior depends on `instagrapi`.
-- Secret fallback storage is plaintext JSON, so environments without a working keyring have weaker local secret protection.
 - Full end-to-end manual acceptance is outside the automated test suite.
 
 Future work should preserve the current adapter boundaries: add behavior behind `AppRunner` and the existing Instagram, OpenRouter, cache, and exporter modules rather than moving external-service logic into the CLI.
