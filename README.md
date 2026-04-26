@@ -8,8 +8,9 @@
 > Scenario: you're like me and save lots of gigs and events in Instagram. Then you forget about them. Life's busy and it's hard to keep track of all those fun events without aligning them with your boring, grown-up calendar. Meet Instacalendar: seamlessly sync an entire Instragram saved post collection to your Google (or other) calendar. Keep track of those events, plan better, go out and explore!
 
 `instacalendar` is a command-line wizard that reads an Instagram saved posts
-collection, asks OpenRouter models to infer calendar events, lets you review
-each candidate event, and exports approved events to `.ics` or Google Calendar.
+collection, asks OpenRouter models through LiteLLM to infer calendar events,
+lets you review each candidate event, and exports approved events to `.ics` or
+Google Calendar.
 
 The app can be installed as Python package or as a Windows executable bundled with PyInstaller.
 
@@ -102,6 +103,12 @@ Limit processing to recent posts, or cap how many matching posts are reviewed:
 uv run instacalendar run --collection "Concerts" --posted-since 2026-04-01 --limit 25
 ```
 
+While extraction is running, the progress output shows runtime-only estimated
+LLM cost and token usage for each post and for the run so far, grouped by model.
+The final summary prints the same per-model token and estimated cost totals.
+These estimates come from LiteLLM/OpenRouter response usage metadata and are not
+persisted in the local cache.
+
 Inspect cached posts and processed exports:
 
 ```bash
@@ -125,7 +132,8 @@ Calendar export sends approved event details to Google. The local cache stores
 post metadata, downloaded image and video files, extracted event results, review
 decisions, and export records so reruns can resume extraction/export without
 contacting Instagram unnecessarily, avoid repeated OpenRouter calls for matching
-posts, and avoid duplicate exports.
+posts, and avoid duplicate exports. Model responses are validated against the
+app's Pydantic extraction schema before they are cached or reviewed.
 
 ## Test And Lint
 

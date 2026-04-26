@@ -4,14 +4,35 @@ import json
 import mimetypes
 from base64 import b64encode
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
-import httpx
+import litellm
+from pydantic import BaseModel, Field
 
 from instacalendar.models import EventDraft, ExtractionResult, InstagramPost
 
-OPENROUTER_CHAT_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/completions"
+OPENROUTER_HEADERS = {
+    "HTTP-Referer": "https://github.com/lkoelman/instacalendar",
+    "X-Title": "instacalendar",
+}
+
+
+@dataclass(frozen=True)
+class ModelUsage:
+    model: str
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    estimated_cost_usd: float | None
+
+
+class ExtractionResponse(BaseModel):
+    status: Literal["event", "not_event", "needs_review"]
+    confidence: float | None = None
+    events: list[EventDraft] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
 
 
 class OpenRouterExtractor:
@@ -22,23 +43,32 @@ class OpenRouterExtractor:
         text_model: str,
         vision_model: str,
         video_model: str | None = None,
-        client: httpx.Client | None = None,
+        completion_func: Callable[..., Any] | None = None,
+        cost_func: Callable[..., float | None] | None = None,
     ) -> None:
         self.api_key = api_key
         self.text_model = text_model
         self.vision_model = vision_model
         self.video_model = video_model or vision_model
-        self.client = client or httpx.Client(timeout=60)
+        self.completion_func = completion_func or litellm.completion
+        self.cost_func = cost_func or litellm.completion_cost
 
     def extract(
         self,
         post: InstagramPost,
         *,
         status_callback: Callable[[str], None] | None = None,
+        usage_callback: Callable[[ModelUsage], None] | None = None,
     ) -> ExtractionResult:
         if status_callback:
             status_callback("Interpreting post text")
-        result = self._call_model(post, self.text_model, include_images=False, include_videos=False)
+        result = self._call_model(
+            post,
+            self.text_model,
+            include_images=False,
+            include_videos=False,
+            usage_callback=usage_callback,
+        )
         if self._is_confident_event(result):
             return result
         if post.images:
@@ -50,6 +80,7 @@ class OpenRouterExtractor:
                 self.vision_model,
                 include_images=True,
                 include_videos=False,
+                usage_callback=usage_callback,
             )
             if self._is_confident_event(result):
                 return result
@@ -64,17 +95,24 @@ class OpenRouterExtractor:
                 self.video_model,
                 include_images=False,
                 include_videos=True,
+                usage_callback=usage_callback,
             )
         if status_callback:
             status_callback("No video fallback available")
         return result
 
     def _call_model(
-        self, post: InstagramPost, model: str, *, include_images: bool, include_videos: bool
+        self,
+        post: InstagramPost,
+        model: str,
+        *,
+        include_images: bool,
+        include_videos: bool,
+        usage_callback: Callable[[ModelUsage], None] | None,
     ) -> ExtractionResult:
-        payload = {
-            "model": model,
-            "messages": [
+        response = self.completion_func(
+            model=self._litellm_model(model),
+            messages=[
                 {
                     "role": "system",
                     "content": (
@@ -92,22 +130,15 @@ class OpenRouterExtractor:
                     ),
                 },
             ],
-            "response_format": {"type": "json_object"},
-            "temperature": 0,
-        }
-        response = self.client.post(
-            OPENROUTER_CHAT_COMPLETIONS_URL,
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-                "HTTP-Referer": "https://github.com/lkoelman/instacalendar",
-                "X-Title": "instacalendar",
-            },
-            json=payload,
+            response_format=ExtractionResponse,
+            provider={"require_parameters": True},
+            temperature=0,
+            api_key=self.api_key,
+            extra_headers=OPENROUTER_HEADERS,
         )
-        response.raise_for_status()
-        content = response.json()["choices"][0]["message"]["content"]
-        return self._parse_result(content, model)
+        if usage_callback:
+            usage_callback(self._usage_from_response(response, model))
+        return self._parse_result(response, model)
 
     def _user_content(
         self, post: InstagramPost, *, include_images: bool, include_videos: bool
@@ -153,13 +184,64 @@ class OpenRouterExtractor:
             return False
         return min((event.confidence or result.confidence or 0) for event in result.events) >= 0.7
 
-    def _parse_result(self, content: str, model: str) -> ExtractionResult:
-        data = json.loads(content)
-        events = [EventDraft.model_validate(event) for event in data.get("events", [])]
+    def _litellm_model(self, model: str) -> str:
+        if model.startswith("openrouter/"):
+            return model
+        return f"openrouter/{model}"
+
+    def _parse_result(self, response: Any, model: str) -> ExtractionResult:
+        parsed = self._message_field(response, "parsed")
+        if parsed is None:
+            content = self._message_field(response, "content")
+            if isinstance(content, str):
+                parsed = ExtractionResponse.model_validate_json(content)
+            else:
+                parsed = ExtractionResponse.model_validate(content)
+        elif not isinstance(parsed, ExtractionResponse):
+            parsed = ExtractionResponse.model_validate(parsed)
         return ExtractionResult(
-            status=data.get("status", "needs_review"),
-            events=events,
+            status=parsed.status,
+            events=parsed.events,
             model_ids=[model],
-            confidence=data.get("confidence"),
-            warnings=data.get("warnings", []),
+            confidence=parsed.confidence,
+            warnings=parsed.warnings,
         )
+
+    def _message_field(self, response: Any, field: str) -> Any:
+        choice = self._index(response, "choices", 0)
+        message = self._get(choice, "message")
+        return self._get(message, field)
+
+    def _usage_from_response(self, response: Any, model: str) -> ModelUsage:
+        usage = self._get(response, "usage") or {}
+        prompt_tokens = int(self._get(usage, "prompt_tokens") or 0)
+        completion_tokens = int(self._get(usage, "completion_tokens") or 0)
+        total_tokens = int(self._get(usage, "total_tokens") or prompt_tokens + completion_tokens)
+        return ModelUsage(
+            model=model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            estimated_cost_usd=self._response_cost(response),
+        )
+
+    def _response_cost(self, response: Any) -> float | None:
+        hidden_params = self._get(response, "_hidden_params") or {}
+        cost = self._get(hidden_params, "response_cost")
+        if cost is None:
+            cost = self._get(response, "response_cost")
+        if cost is None:
+            try:
+                cost = self.cost_func(completion_response=response)
+            except Exception:
+                return None
+        return float(cost) if cost is not None else None
+
+    def _index(self, value: Any, field: str, index: int) -> Any:
+        sequence = self._get(value, field) or []
+        return sequence[index]
+
+    def _get(self, value: Any, field: str) -> Any:
+        if isinstance(value, dict):
+            return value.get(field)
+        return getattr(value, field, None)

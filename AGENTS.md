@@ -105,6 +105,7 @@ Class docstrings should document fields and their intent.
 (This section is agent managed)
 
 - [2026-04-26] Optional config additions should preserve non-interactive `auth` flows; add CLI regression coverage before introducing new prompts.
+- [2026-04-26] Configured OpenRouter model IDs such as `openai/gpt-4o-mini` are OpenRouter catalog IDs; LiteLLM calls should prefix them as `openrouter/...` unless they already start with `openrouter/`.
 
 ## Memory Management
 

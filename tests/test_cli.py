@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from typer.testing import CliRunner
 
 from instacalendar.cli import app
-from instacalendar.runner import RunSummary
+from instacalendar.runner import ModelUsageTotal, RunSummary
 
 
 def test_cli_cache_list_initializes_empty_cache(tmp_path: Path, monkeypatch) -> None:
@@ -180,6 +180,37 @@ def test_cli_run_passes_post_filters_to_runner(monkeypatch) -> None:
     assert result.exit_code == 0
     assert calls[0]["posted_since"] == date(2026, 4, 1)
     assert calls[0]["limit"] == 3
+
+
+def test_cli_run_prints_extraction_cost_summary(monkeypatch) -> None:
+    class FakeAppRunner:
+        def __init__(self, *args, **kwargs) -> None:
+            return None
+
+        def run(self, **kwargs) -> RunSummary:
+            return RunSummary(
+                processed_posts=2,
+                approved_events=0,
+                exported_events=0,
+                destination="events.ics",
+                extraction_usage_by_model={
+                    "text": ModelUsageTotal(
+                        prompt_tokens=200,
+                        completion_tokens=50,
+                        total_tokens=250,
+                        estimated_cost_usd=0.002,
+                        calls=2,
+                    )
+                },
+            )
+
+    monkeypatch.setattr("instacalendar.cli.AppRunner", FakeAppRunner)
+
+    result = CliRunner().invoke(app, ["run"])
+
+    assert result.exit_code == 0
+    assert "Extraction cost: est. $0.0020" in result.stdout
+    assert "text: 250 tokens ($0.0020, 2 calls)" in result.stdout
 
 
 def test_cli_run_passes_from_cache_to_runner(monkeypatch) -> None:

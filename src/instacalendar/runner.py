@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import re
 from contextlib import AbstractContextManager, nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from mimetypes import guess_extension, guess_type
 from pathlib import Path
@@ -16,7 +16,7 @@ from instacalendar.cache import EVENT_CACHE_KEYS, Cache, CachedMedia
 from instacalendar.config import AppConfig, AppPaths, ConfigStore
 from instacalendar.exporters.google import GoogleCalendarExporter
 from instacalendar.exporters.ics import IcsExporter
-from instacalendar.extractors.openrouter import OpenRouterExtractor
+from instacalendar.extractors.openrouter import ModelUsage, OpenRouterExtractor
 from instacalendar.instagram import LiveInstagramClient
 from instacalendar.models import (
     EventDraft,
@@ -80,11 +80,54 @@ class NullProgressTask:
 
 
 @dataclass(frozen=True)
+class ModelUsageTotal:
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    estimated_cost_usd: float | None = 0
+    calls: int = 0
+
+
+@dataclass
+class ExtractionUsageTracker:
+    by_model: dict[str, ModelUsageTotal] = field(default_factory=dict)
+    total_cost_unavailable: bool = False
+
+    def record(self, usage: ModelUsage) -> None:
+        current = self.by_model.get(usage.model, ModelUsageTotal())
+        cost = self._sum_cost(current.estimated_cost_usd, usage.estimated_cost_usd)
+        if usage.estimated_cost_usd is None:
+            self.total_cost_unavailable = True
+        self.by_model[usage.model] = ModelUsageTotal(
+            prompt_tokens=current.prompt_tokens + usage.prompt_tokens,
+            completion_tokens=current.completion_tokens + usage.completion_tokens,
+            total_tokens=current.total_tokens + usage.total_tokens,
+            estimated_cost_usd=cost,
+            calls=current.calls + 1,
+        )
+
+    @property
+    def estimated_cost_usd(self) -> float | None:
+        if self.total_cost_unavailable:
+            return None
+        return sum((usage.estimated_cost_usd or 0) for usage in self.by_model.values())
+
+    def copy_totals(self) -> dict[str, ModelUsageTotal]:
+        return dict(self.by_model)
+
+    def _sum_cost(self, current: float | None, incoming: float | None) -> float | None:
+        if current is None or incoming is None:
+            return None
+        return current + incoming
+
+
+@dataclass(frozen=True)
 class RunSummary:
     processed_posts: int
     approved_events: int
     exported_events: int
     destination: str
+    extraction_usage_by_model: dict[str, ModelUsageTotal] = field(default_factory=dict)
 
 
 class AppRunner:
@@ -211,10 +254,12 @@ class AppRunner:
             vision_model=vision_model,
             video_model=video_model,
         )
+        run_usage = ExtractionUsageTracker()
         approved: list[tuple[str, EventDraft, str, int]] = []
         with self.progress.task("Processing posts", total=len(posts)) as progress_task:
             for post_number, post in enumerate(posts, start=1):
                 extraction_statuses: list[str] = []
+                post_usage = ExtractionUsageTracker()
 
                 def report_extraction_status(
                     message: str,
@@ -225,6 +270,22 @@ class AppRunner:
                     statuses.append(message)
                     progress_task.update(f"Post {post_number}/{len(posts)}: {message}")
 
+                def report_extraction_usage(
+                    usage: ModelUsage,
+                    *,
+                    post_number: int = post_number,
+                    post_usage: ExtractionUsageTracker = post_usage,
+                    run_usage: ExtractionUsageTracker = run_usage,
+                ) -> None:
+                    post_usage.record(usage)
+                    run_usage.record(usage)
+                    progress_task.update(
+                        f"Post {post_number}/{len(posts)}: "
+                        f"{self._usage_summary('post est.', post_usage)}; "
+                        f"{self._usage_summary('run est.', run_usage)}; "
+                        f"{self._model_usage_summary(run_usage.by_model)}"
+                    )
+
                 result = None
                 if not ignore_event_cache:
                     result = self._cached_extraction_result(
@@ -233,7 +294,11 @@ class AppRunner:
                         event_cache_key=event_cache_key,
                     )
                 if result is None:
-                    result = extractor.extract(post, status_callback=report_extraction_status)
+                    result = extractor.extract(
+                        post,
+                        status_callback=report_extraction_status,
+                        usage_callback=report_extraction_usage,
+                    )
                     self.cache.record_extraction_result(
                         media_pk=post.media_pk,
                         model_signature=model_signature,
@@ -242,7 +307,13 @@ class AppRunner:
                         extracted_at=datetime.now(UTC),
                     )
                 progress_task.report(
-                    self._post_extraction_summary(post, result, extraction_statuses)
+                    self._post_extraction_summary(
+                        post,
+                        result,
+                        extraction_statuses,
+                        post_usage=post_usage,
+                        run_usage=run_usage,
+                    )
                 )
                 progress_task.advance()
                 for index, draft in enumerate(result.events):
@@ -312,6 +383,7 @@ class AppRunner:
             approved_events=len(approved),
             exported_events=exported_count,
             destination=destination_label,
+            extraction_usage_by_model=run_usage.copy_totals(),
         )
 
     def _review(self, draft: EventDraft) -> bool:
@@ -324,15 +396,54 @@ class AppRunner:
         return draft.is_exportable and self.prompt.confirm("\n".join(lines), default=True)
 
     def _post_extraction_summary(
-        self, post: InstagramPost, result: ExtractionResult, extraction_statuses: list[str]
+        self,
+        post: InstagramPost,
+        result: ExtractionResult,
+        extraction_statuses: list[str],
+        *,
+        post_usage: ExtractionUsageTracker | None = None,
+        run_usage: ExtractionUsageTracker | None = None,
     ) -> str:
         poster = post.poster_username or "unknown"
         posted_date = post.taken_at.date().isoformat() if post.taken_at else "unknown date"
         if not result.events:
-            return f"@{poster} ({posted_date}) - failed - no event details"
+            summary = f"@{poster} ({posted_date}) - failed - no event details"
+            return self._with_usage_summary(summary, post_usage, run_usage)
         source = self._extraction_source(extraction_statuses)
         details = "; ".join(self._event_summary(draft) for draft in result.events)
-        return f"@{poster} ({posted_date}) - got event from {source} - {details}"
+        summary = f"@{poster} ({posted_date}) - got event from {source} - {details}"
+        return self._with_usage_summary(summary, post_usage, run_usage)
+
+    def _with_usage_summary(
+        self,
+        message: str,
+        post_usage: ExtractionUsageTracker | None,
+        run_usage: ExtractionUsageTracker | None,
+    ) -> str:
+        if not post_usage or not run_usage or not post_usage.by_model:
+            return message
+        return (
+            f"{message} - {self._usage_summary('post est.', post_usage)}; "
+            f"{self._usage_summary('run est.', run_usage)}; "
+            f"{self._model_usage_summary(post_usage.by_model)}"
+        )
+
+    def _usage_summary(self, label: str, usage: ExtractionUsageTracker) -> str:
+        cost = usage.estimated_cost_usd
+        if cost is None:
+            return f"{label} unavailable"
+        return f"{label} ${cost:.4f}"
+
+    def _model_usage_summary(self, usage_by_model: dict[str, ModelUsageTotal]) -> str:
+        return "; ".join(
+            f"{model}: {usage.total_tokens} tokens ({self._format_cost(usage.estimated_cost_usd)})"
+            for model, usage in sorted(usage_by_model.items())
+        )
+
+    def _format_cost(self, cost: float | None) -> str:
+        if cost is None:
+            return "cost unavailable"
+        return f"${cost:.4f}"
 
     def _extraction_source(self, extraction_statuses: list[str]) -> str:
         if "Interpreting video" in extraction_statuses:

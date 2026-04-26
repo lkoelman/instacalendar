@@ -43,7 +43,7 @@ graph LR
     Cache -->|"cached posts + local image paths"| Runner
 
     Runner -->|"caption, metadata, optional image URLs/data URLs"| OpenRouter["extractors.openrouter.OpenRouterExtractor"]
-    OpenRouter -->|"HTTPS JSON chat completions"| OpenRouterAPI["OpenRouter API"]
+    OpenRouter -->|"LiteLLM chat completions"| OpenRouterAPI["OpenRouter API"]
     OpenRouter -->|"ExtractionResult / EventDraft"| Models
 
     Runner -->|"review candidate events"| User
@@ -126,11 +126,11 @@ Key technologies: instagrapi, Python logging.
 
 ### `src/instacalendar/extractors/openrouter.py`
 
-Calls OpenRouter's chat completions API. Extraction is text-first: the configured text model receives caption, source URL, taken-at timestamp, and location metadata. The extractor can report phase messages to the runner while it interprets post text and, when needed, falls back to image and then video interpretation. If the result is not a confident event and image references are available, the configured vision model receives the same metadata plus image URL content blocks. If image extraction is still inconclusive and cached local videos are available, the configured video model receives the same metadata plus video URL content blocks. Local cached image and video files are encoded as data URLs for multimodal requests. Remote video URLs are not sent when local caching failed.
+Calls OpenRouter through LiteLLM's chat completions API. Extraction is text-first: the configured text model receives caption, source URL, taken-at timestamp, and location metadata. The extractor can report phase messages to the runner while it interprets post text and, when needed, falls back to image and then video interpretation. If the result is not a confident event and image references are available, the configured vision model receives the same metadata plus image URL content blocks. If image extraction is still inconclusive and cached local videos are available, the configured video model receives the same metadata plus video URL content blocks. Local cached image and video files are encoded as data URLs for multimodal requests. Remote video URLs are not sent when local caching failed.
 
-Responses are expected to be JSON objects containing `status`, `confidence`, `events`, and `warnings`. Parsed events are validated as `EventDraft` instances.
+Responses are requested with a Pydantic response schema and OpenRouter structured-output routing requirements. Returned content is validated as `ExtractionResult` / `EventDraft` data before it is cached or reviewed. Each LiteLLM response contributes runtime-only usage telemetry to the runner: prompt tokens, completion tokens, total tokens, estimated cost, and call count grouped by model.
 
-Key technologies: httpx, OpenRouter chat completions JSON payloads.
+Key technologies: LiteLLM, OpenRouter chat completions, Pydantic structured outputs.
 
 ### `src/instacalendar/exporters/ics.py`
 
@@ -172,7 +172,7 @@ Key technologies: google-auth-oauthlib, google-api-python-client.
 5. Posts are fetched, normalized to `InstagramPost`, optionally filtered by `--posted-since`, then capped by `--limit`.
 6. Selected posts are stored in SQLite and their image/video media are downloaded under the app data media directory.
 7. Before extraction, the runner checks `cached_extractions` unless `--ignore-event-cache` is set. The default hit policy requires the same post, configured OpenRouter model set, and extraction source type.
-8. Cache misses are sent to `OpenRouterExtractor.extract()` using local cached images and videos where available, then the structured `ExtractionResult` is saved immediately.
+8. Cache misses are sent to `OpenRouterExtractor.extract()` using local cached images and videos where available, then the structured `ExtractionResult` is saved immediately. LiteLLM usage metadata is aggregated for the active command and printed as estimated cost and token totals by model.
 9. Each returned `EventDraft` receives a stable UID and is skipped if the cache already has an export for the chosen destination.
 10. Exportable drafts are shown to the user for approve/skip review.
 11. Approved drafts are exported to `.ics` or Google Calendar.
@@ -228,8 +228,8 @@ No webhooks or inbound network API are exposed by this application. The only lis
 - Cache at rest: SQLite database in `AppPaths.cache_file`.
 - Extraction cache records at rest: structured `ExtractionResult` JSON keyed by post, model signature, and source media kind.
 - Cached media at rest: files under `AppPaths.media_dir`.
-- OpenRouter requests: HTTPS JSON chat completion payloads with text-only, image, or video message content.
-- OpenRouter responses: JSON string in `choices[0].message.content`, parsed into `ExtractionResult`.
+- OpenRouter requests: LiteLLM chat completion calls with text-only, image, or video message content and a Pydantic response schema.
+- OpenRouter responses: structured message content validated into `ExtractionResult`.
 - ICS export: iCalendar 2.0 bytes written by the `icalendar` package.
 - Google export: Google Calendar API JSON event bodies.
 
@@ -253,7 +253,7 @@ OpenRouter JSON parsing, HTTP failures, Google API errors, and filesystem errors
 
 ### Logging and Observability
 
-The CLI shows user-facing progress with Rich status messages and a determinate post-processing meter during extraction. After each processed post, it prints a persistent summary bullet with the poster, post date, extraction outcome, and inferred event date/location. The Instagram adapter uses module logging for partial-fetch warnings. There is no structured logging, metrics, tracing, telemetry, or persistent run log.
+The CLI shows user-facing progress with Rich status messages and a determinate post-processing meter during extraction. After each processed post, it prints a persistent summary bullet with the poster, post date, extraction outcome, inferred event date/location, estimated post cost, run cost so far, and token/cost totals by model. The Instagram adapter uses module logging for partial-fetch warnings. Cost and token telemetry is runtime-only and is not persisted as a structured run log.
 
 ### Security and Privacy
 
@@ -308,8 +308,7 @@ The implementation covers the core v1 flow, but several items from the initial p
 
 - Review is approve/skip only; editing inferred event fields in the CLI is not implemented.
 - OpenRouter model discovery and modality validation are not implemented; users provide model IDs directly.
-- OpenRouter response handling assumes valid JSON and does not retry malformed model output.
-- The extractor does not use a formal JSON Schema beyond `response_format={"type": "json_object"}`.
+- OpenRouter response handling validates structured output through LiteLLM/Pydantic but does not retry malformed model output.
 - SQLite stores successful structured extraction results, but not failed extraction attempts or raw OpenRouter responses.
 - Google calendar selection or creation is not implemented; the app uses configured `google_calendar_id` or `primary`.
 - Instagram 2FA/challenge-specific prompt handling is not implemented directly; behavior depends on `instagrapi`.

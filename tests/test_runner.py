@@ -3,6 +3,7 @@ from pathlib import Path
 from unittest.mock import Mock
 
 from instacalendar.config import AppPaths
+from instacalendar.extractors.openrouter import ModelUsage
 from instacalendar.models import (
     EventDraft,
     ExtractionResult,
@@ -147,7 +148,7 @@ def test_run_reports_progress_for_instagram_extraction_and_export(
 
     fake_extractor = Mock()
 
-    def fake_extract(post: InstagramPost, *, status_callback):
+    def fake_extract(post: InstagramPost, *, status_callback, usage_callback=None):
         status_callback("Interpreting post text")
         return ExtractionResult(status="not_event")
 
@@ -184,6 +185,65 @@ def test_run_reports_progress_for_instagram_extraction_and_export(
     assert fake_extractor.extract.call_args.kwargs["status_callback"] is not None
 
     assert runner.cache.load_cached_posts("Concerts")[0].media_pk == "1"
+
+
+def test_run_reports_runtime_extraction_costs_by_model(tmp_path: Path, monkeypatch) -> None:
+    paths = AppPaths.from_base(tmp_path)
+    progress = FakeProgress()
+    runner = AppRunner(paths, FakePrompt(confirm_answer=True), progress=progress)
+    runner.configure(
+        instagram_username="musicfan",
+        instagram_password="instagram-secret",
+        openrouter_api_key="openrouter-secret",
+        openrouter_text_model="text",
+        openrouter_vision_model="vision",
+    )
+
+    class FakeInstagramClient:
+        def __init__(self, username: str, password: str, session_file: Path) -> None:
+            return None
+
+        def authenticate(self) -> None:
+            return None
+
+        def list_collections(self) -> list[str]:
+            return ["Concerts"]
+
+        def fetch_collection_posts(self, collection_name: str) -> list[InstagramPost]:
+            return [InstagramPost(media_pk="1", caption="not an event", media_kind="image")]
+
+    fake_extractor = Mock()
+
+    def fake_extract(post: InstagramPost, *, status_callback, usage_callback):
+        status_callback("Interpreting post text")
+        usage_callback(
+            ModelUsage(
+                model="text",
+                prompt_tokens=100,
+                completion_tokens=25,
+                total_tokens=125,
+                estimated_cost_usd=0.001,
+            )
+        )
+        return ExtractionResult(status="not_event")
+
+    fake_extractor.extract.side_effect = fake_extract
+    monkeypatch.setattr("instacalendar.runner.LiveInstagramClient", FakeInstagramClient)
+    monkeypatch.setattr(
+        "instacalendar.runner.OpenRouterExtractor",
+        lambda **kwargs: fake_extractor,
+    )
+    monkeypatch.setattr("instacalendar.runner.IcsExporter", lambda: Mock(export=Mock()))
+
+    summary = runner.run(ics_output=tmp_path / "events.ics")
+
+    assert any("post est. $0.0010" in update for update in progress.task_updates)
+    assert progress.task_reports == [
+        "@unknown (unknown date) - failed - no event details - "
+        "post est. $0.0010; run est. $0.0010; text: 125 tokens ($0.0010)"
+    ]
+    assert summary.extraction_usage_by_model["text"].total_tokens == 125
+    assert summary.extraction_usage_by_model["text"].estimated_cost_usd == 0.001
 
 
 def test_run_reports_completed_post_with_event_source_and_details(
@@ -223,7 +283,7 @@ def test_run_reports_completed_post_with_event_source_and_details(
 
     fake_extractor = Mock()
 
-    def fake_extract(post: InstagramPost, *, status_callback):
+    def fake_extract(post: InstagramPost, *, status_callback, usage_callback=None):
         status_callback("Interpreting post text")
         status_callback("Falling back to image")
         status_callback("Interpreting image")
@@ -289,7 +349,7 @@ def test_run_reports_completed_post_from_video_fallback(tmp_path: Path, monkeypa
 
     fake_extractor = Mock()
 
-    def fake_extract(post: InstagramPost, *, status_callback):
+    def fake_extract(post: InstagramPost, *, status_callback, usage_callback=None):
         status_callback("Interpreting post text")
         status_callback("Falling back to video")
         status_callback("Interpreting video")
@@ -809,7 +869,7 @@ def test_run_ignore_event_cache_forces_extraction_and_updates_cache(
 
     fake_extractor = Mock()
 
-    def fake_extract(post: InstagramPost, *, status_callback):
+    def fake_extract(post: InstagramPost, *, status_callback, usage_callback=None):
         status_callback("Interpreting post text")
         status_callback("Falling back to image")
         status_callback("Interpreting image")

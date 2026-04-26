@@ -13,7 +13,7 @@ from rich.table import Table
 
 from instacalendar.cache import EVENT_CACHE_KEYS, Cache
 from instacalendar.config import AppPaths
-from instacalendar.runner import AppRunner
+from instacalendar.runner import AppRunner, ModelUsageTotal, RunSummary
 
 app = typer.Typer(help="Turn Instagram saved event posts into calendar events.")
 cache_app = typer.Typer(help="Inspect or clear local processing records.")
@@ -125,6 +125,7 @@ def main(
             f"Exported {summary.exported_events} events from {summary.processed_posts} posts "
             f"to {summary.destination}"
         )
+        _print_extraction_cost_summary(summary)
 
 
 @app.command()
@@ -206,6 +207,7 @@ def run(
         f"Exported {summary.exported_events} events from {summary.processed_posts} posts "
         f"to {summary.destination}"
     )
+    _print_extraction_cost_summary(summary)
 
 
 @cache_app.command("list-events")
@@ -325,6 +327,33 @@ def _format_file_counts(file_counts: dict[str, int]) -> str:
         return "0 files"
     parts = [f"{kind}: {file_counts[kind]}" for kind in sorted(file_counts)]
     return ", ".join(parts)
+
+
+def _print_extraction_cost_summary(summary: RunSummary) -> None:
+    if not summary.extraction_usage_by_model:
+        return
+    total_cost = _total_cost(summary.extraction_usage_by_model)
+    console.print(f"Extraction cost: est. {_format_cost(total_cost)}")
+    for model, usage in sorted(summary.extraction_usage_by_model.items()):
+        console.print(
+            f"- {model}: {usage.total_tokens} tokens "
+            f"({_format_cost(usage.estimated_cost_usd)}, {usage.calls} calls)"
+        )
+
+
+def _total_cost(usage_by_model: dict[str, ModelUsageTotal]) -> float | None:
+    total = 0.0
+    for usage in usage_by_model.values():
+        if usage.estimated_cost_usd is None:
+            return None
+        total += usage.estimated_cost_usd
+    return total
+
+
+def _format_cost(cost: float | None) -> str:
+    if cost is None:
+        return "unavailable"
+    return f"${cost:.4f}"
 
 
 def _format_bytes(size: int) -> str:
