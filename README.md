@@ -20,6 +20,16 @@ The app can be installed as Python package or as a Windows executable bundled wi
 uv sync --dev
 ```
 
+Because `instagrapi` tracks the undocumented Instagram API at a fast-changing pace, upgrading this dependency regularly could prevent bugs arising due to API divergence:
+
+```bash
+# upgrade out environment and uv.lock file:
+uv sync --upgrade-package instagrapi
+
+# upgrade instagrapi before running a command
+uv run --upgrade-package instagrapi instacalendar <command>
+```
+
 ## Configure
 
 Run the guided setup:
@@ -65,10 +75,10 @@ needed to list calendars and insert events.
 Start the guided wizard:
 
 ```bash
-uv run instacalendar
+uv run --upgrade-package instagrapi instacalendar
 ```
 
-Run a configured collection directly:
+Export a collection directly:
 
 ```bash
 uv run instacalendar run --collection "Concerts" --ics-output events.ics
