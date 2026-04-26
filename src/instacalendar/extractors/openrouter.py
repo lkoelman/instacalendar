@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import os
+import sys
 from base64 import b64encode
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from dataclasses import dataclass
+from io import StringIO
 from pathlib import Path
 from typing import Any, Literal
 
@@ -17,6 +21,79 @@ OPENROUTER_HEADERS = {
     "HTTP-Referer": "https://github.com/lkoelman/instacalendar",
     "X-Title": "instacalendar",
 }
+
+
+@contextmanager
+def _litellm_diagnostic_span(label: str) -> Iterator[None]:
+    if not os.environ.get("INSTACALENDAR_DEBUG_LITELLM_OUTPUT"):
+        yield
+        return
+
+    stdout = StringIO()
+    stderr = StringIO()
+    print(f"[instacalendar litellm-debug] enter {label}", file=sys.stderr)
+    try:
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            yield
+    finally:
+        _replay_diagnostic_output(label, "stdout", stdout.getvalue())
+        _replay_diagnostic_output(label, "stderr", stderr.getvalue())
+        print(f"[instacalendar litellm-debug] exit {label}", file=sys.stderr)
+
+
+def _replay_diagnostic_output(label: str, stream_name: str, output: str) -> None:
+    if not output:
+        return
+    print(
+        f"[instacalendar litellm-debug] captured {stream_name} from {label}:",
+        file=sys.stderr,
+    )
+    for line in output.splitlines() or [output]:
+        print(f"[instacalendar litellm-debug] {label} {stream_name}> {line}", file=sys.stderr)
+
+
+def _install_openrouter_provider_inference() -> None:
+    if getattr(litellm, "_instacalendar_openrouter_provider_inference", False):
+        return
+    original_get_llm_provider = litellm.get_llm_provider
+
+    def get_llm_provider(*args: Any, **kwargs: Any) -> Any:
+        model = kwargs.get("model") if "model" in kwargs else (args[0] if args else None)
+        provider = kwargs.get("custom_llm_provider")
+        if provider is None and len(args) >= 2:
+            provider = args[1]
+        if provider is None and _looks_like_openrouter_catalog_model(model):
+            kwargs = dict(kwargs)
+            kwargs.pop("custom_llm_provider", None)
+            if not args:
+                return original_get_llm_provider(
+                    custom_llm_provider="openrouter",
+                    **kwargs,
+                )
+            if len(args) == 1:
+                return original_get_llm_provider(
+                    args[0],
+                    custom_llm_provider="openrouter",
+                    **kwargs,
+                )
+            return original_get_llm_provider(
+                args[0],
+                "openrouter",
+                *args[2:],
+                **kwargs,
+            )
+        return original_get_llm_provider(*args, **kwargs)
+
+    litellm.get_llm_provider = get_llm_provider
+    litellm.utils.get_llm_provider = get_llm_provider
+    litellm._instacalendar_openrouter_provider_inference = True
+
+
+def _looks_like_openrouter_catalog_model(model: Any) -> bool:
+    return isinstance(model, str) and "/" in model and not model.startswith("openrouter/")
+
+
+_install_openrouter_provider_inference()
 
 
 @dataclass(frozen=True)
@@ -110,32 +187,39 @@ class OpenRouterExtractor:
         include_videos: bool,
         usage_callback: Callable[[ModelUsage], None] | None,
     ) -> ExtractionResult:
-        response = self.completion_func(
-            model=self._litellm_model(model),
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "Extract calendar event data from Instagram posts. "
-                        "Return only JSON with status, confidence, events, and warnings. "
-                        "status must be event, not_event, or needs_review."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": self._user_content(
-                        post,
-                        include_images=include_images,
-                        include_videos=include_videos,
-                    ),
-                },
-            ],
-            response_format=ExtractionResponse,
-            provider={"require_parameters": True},
-            temperature=0,
-            api_key=self.api_key,
-            extra_headers=OPENROUTER_HEADERS,
+        diagnostic_label = (
+            "completion "
+            f"configured_model={model} "
+            f"litellm_model={self._litellm_model(model)} "
+            f"images={include_images} videos={include_videos}"
         )
+        with _litellm_diagnostic_span(diagnostic_label):
+            response = self.completion_func(
+                model=self._litellm_model(model),
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "Extract calendar event data from Instagram posts. "
+                            "Return only JSON with status, confidence, events, and warnings. "
+                            "status must be event, not_event, or needs_review."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": self._user_content(
+                            post,
+                            include_images=include_images,
+                            include_videos=include_videos,
+                        ),
+                    },
+                ],
+                response_format=ExtractionResponse,
+                provider={"require_parameters": True},
+                temperature=0,
+                api_key=self.api_key,
+                extra_headers=OPENROUTER_HEADERS,
+            )
         if usage_callback:
             usage_callback(self._usage_from_response(response, model))
         return self._parse_result(response, model)
@@ -232,10 +316,16 @@ class OpenRouterExtractor:
             cost = self._get(response, "response_cost")
         if cost is None:
             try:
-                cost = self.cost_func(
-                    completion_response=response,
-                    model=self._litellm_model(model),
+                diagnostic_label = (
+                    "completion_cost "
+                    f"configured_model={model} "
+                    f"litellm_model={self._litellm_model(model)}"
                 )
+                with _litellm_diagnostic_span(diagnostic_label):
+                    cost = self.cost_func(
+                        completion_response=response,
+                        model=self._litellm_model(model),
+                    )
             except Exception:
                 return None
         return float(cost) if cost is not None else None

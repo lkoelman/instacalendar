@@ -1,9 +1,11 @@
 import base64
+import time
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
+import litellm
 import pytest
 
 from instacalendar.extractors.openrouter import OpenRouterExtractor
@@ -133,6 +135,150 @@ def test_openrouter_passes_openrouter_model_to_litellm_cost_fallback() -> None:
     )
 
     assert cost_calls[0]["model"] == "openrouter/qwen/qwen3.5-9b"
+
+
+def test_openrouter_leaves_litellm_output_raw_without_diagnostics(capsys, monkeypatch) -> None:
+    monkeypatch.delenv("INSTACALENDAR_DEBUG_LITELLM_OUTPUT", raising=False)
+
+    def noisy_completion(**kwargs):
+        print("Provider List: https://docs.litellm.ai/docs/providers")
+        return _response(
+            """
+            {
+              "status": "event",
+              "confidence": 0.91,
+              "events": [{"title": "Live Set", "start": "2026-05-03T20:00:00-04:00"}],
+              "warnings": []
+            }
+            """
+        )
+
+    OpenRouterExtractor(
+        api_key="key",
+        text_model="qwen/qwen3.5-9b",
+        vision_model="google/gemini-3-flash-preview",
+        completion_func=noisy_completion,
+        cost_func=lambda **kwargs: 0.0,
+    ).extract(InstagramPost(media_pk="1", caption="Live Set", media_kind="image"))
+
+    captured = capsys.readouterr()
+    assert "Provider List" in captured.out
+    assert "instacalendar litellm-debug" not in captured.err
+
+
+def test_openrouter_litellm_completion_treats_nitro_catalog_id_as_openrouter(
+    capsys, monkeypatch
+) -> None:
+    monkeypatch.delenv("INSTACALENDAR_DEBUG_LITELLM_OUTPUT", raising=False)
+
+    def completion(**kwargs):
+        return litellm.completion(
+            **kwargs,
+            mock_response="""
+            {
+              "status": "event",
+              "confidence": 0.91,
+              "events": [{"title": "Live Set", "start": "2026-05-03T20:00:00-04:00"}],
+              "warnings": []
+            }
+            """,
+        )
+
+    result = OpenRouterExtractor(
+        api_key="key",
+        text_model="qwen/qwen3.5-9b:nitro",
+        vision_model="google/gemini-3-flash-preview",
+        completion_func=completion,
+        cost_func=lambda **kwargs: 0.0,
+    ).extract(InstagramPost(media_pk="1", caption="Live Set", media_kind="image"))
+
+    time.sleep(0.5)
+    captured = capsys.readouterr()
+    assert result.status == "event"
+    assert result.model_ids == ["qwen/qwen3.5-9b:nitro"]
+    assert "Provider List" not in captured.out
+    assert "Provider List" not in captured.err
+
+
+def test_openrouter_tags_litellm_cost_fallback_output_when_diagnostics_enabled(
+    capsys, monkeypatch
+) -> None:
+    monkeypatch.setenv("INSTACALENDAR_DEBUG_LITELLM_OUTPUT", "1")
+
+    def noisy_cost(**kwargs):
+        print("Provider List: https://docs.litellm.ai/docs/providers")
+        raise RuntimeError("unable to infer provider")
+
+    usages = []
+    result = OpenRouterExtractor(
+        api_key="key",
+        text_model="qwen/qwen3.5-9b",
+        vision_model="google/gemini-3-flash-preview",
+        completion_func=lambda **kwargs: _response(
+            """
+            {
+              "status": "event",
+              "confidence": 0.91,
+              "events": [{"title": "Live Set", "start": "2026-05-03T20:00:00-04:00"}],
+              "warnings": []
+            }
+            """,
+            prompt_tokens=100,
+            completion_tokens=20,
+        ),
+        cost_func=noisy_cost,
+    ).extract(
+        InstagramPost(media_pk="1", caption="Live Set", media_kind="image"),
+        usage_callback=usages.append,
+    )
+
+    captured = capsys.readouterr()
+    assert result.status == "event"
+    assert usages[0].estimated_cost_usd is None
+    assert captured.out == ""
+    assert "captured stdout from completion_cost configured_model=qwen/qwen3.5-9b" in (
+        captured.err
+    )
+    assert "completion_cost configured_model=qwen/qwen3.5-9b" in captured.err
+    assert "stdout> Provider List: https://docs.litellm.ai/docs/providers" in captured.err
+
+
+def test_openrouter_tags_litellm_completion_output_when_diagnostics_enabled(
+    capsys, monkeypatch
+) -> None:
+    monkeypatch.setenv("INSTACALENDAR_DEBUG_LITELLM_OUTPUT", "1")
+
+    def noisy_completion(**kwargs):
+        print("Provider List: https://docs.litellm.ai/docs/providers")
+        return _response(
+            """
+            {
+              "status": "event",
+              "confidence": 0.91,
+              "events": [{"title": "Live Set", "start": "2026-05-03T20:00:00-04:00"}],
+              "warnings": []
+            }
+            """
+        )
+
+    result = OpenRouterExtractor(
+        api_key="key",
+        text_model="qwen/qwen3.5-9b",
+        vision_model="google/gemini-3-flash-preview",
+        completion_func=noisy_completion,
+        cost_func=lambda **kwargs: 0.0,
+    ).extract(InstagramPost(media_pk="1", caption="Live Set", media_kind="image"))
+
+    captured = capsys.readouterr()
+    assert result.status == "event"
+    assert captured.out == ""
+    assert "enter completion configured_model=qwen/qwen3.5-9b" in captured.err
+    assert "captured stdout from completion configured_model=qwen/qwen3.5-9b" in (
+        captured.err
+    )
+    assert "completion configured_model=qwen/qwen3.5-9b" in captured.err
+    assert "stdout> " in captured.err
+    assert "Provider List: https://docs.litellm.ai/docs/providers" in captured.err
 
 
 def test_openrouter_reports_text_interpretation_status() -> None:
