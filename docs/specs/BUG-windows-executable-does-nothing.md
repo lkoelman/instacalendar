@@ -1,0 +1,1 @@
+The windows executable built in CI using `pyinstaller` does nothing: neither when you run the .exe from the command, nor when you double click it to execute (the command prompt window pops up and disappears immediately).
