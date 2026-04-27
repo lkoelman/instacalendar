@@ -14,7 +14,25 @@ Google Calendar.
 
 The app can be installed as Python package or as a Windows executable bundled with PyInstaller.
 
-## Install For Development
+## TLDR
+
+```bash
+git clone https://github.com/lkoelman/instacalendar.git
+cd instalendar && uv sync
+
+# run setup
+uv run instacalendar init
+
+# run interactively (fetch Instagram collections and select one)
+uv run instacalendar
+
+# export specific collection
+uv run instacalendar run --collection "Concerts" --ics-output events.ics
+```
+
+## Installation
+
+### Install From Source
 
 ```bash
 uv sync --dev
@@ -57,6 +75,10 @@ that value before prompting you to type one.
 Secrets are stored in the operating system keyring. Instagram session settings are stored
 under the app data directory to avoid repeated logins.
 
+### Google Calendar Export
+
+For now, just import the .ics file in your Google Calendar. In the future, an OAuth Client ID will be created so you can directly push events to your Google calendar.
+
 For Google Calendar export, authenticate during setup:
 
 ```bash
@@ -86,7 +108,7 @@ The OAuth client must be a Google desktop app. The app requests the
 Start the guided wizard:
 
 ```bash
-uv run --upgrade-package instagrapi instacalendar
+uv run instacalendar
 ```
 
 Export a collection directly:
