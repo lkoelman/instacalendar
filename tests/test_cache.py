@@ -323,13 +323,16 @@ def test_cache_lists_cached_extractions(tmp_path: Path) -> None:
                 EventDraft(
                     title="Club Night",
                     start=datetime(2026, 5, 3, 20, 0, tzinfo=ZoneInfo("UTC")),
+                    location_name="The Room",
                 ),
                 EventDraft(
                     title="Day Party",
                     start=datetime(2026, 5, 4, 14, 0, tzinfo=ZoneInfo("UTC")),
+                    location_name="The Garden",
+                    source_url="https://www.instagram.com/p/day-party/",
                 ),
             ],
-            model_ids=["text"],
+            model_ids=["vision"],
             confidence=0.9,
             warnings=["low resolution"],
         ),
@@ -356,4 +359,7 @@ def test_cache_lists_cached_extractions(tmp_path: Path) -> None:
     assert extractions[1].status == "event"
     assert extractions[1].event_count == 2
     assert extractions[1].event_titles == ["Club Night", "Day Party"]
+    assert extractions[1].event_locations == ["The Room", "The Garden"]
+    assert extractions[1].event_source_urls == ["", "https://www.instagram.com/p/day-party/"]
+    assert extractions[1].display_model == "vision"
     assert extractions[1].warnings_count == 1

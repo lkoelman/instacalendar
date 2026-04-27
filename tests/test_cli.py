@@ -30,7 +30,7 @@ def test_cli_cache_events_shows_cached_extractions(tmp_path: Path, monkeypatch) 
 
     from instacalendar.cache import Cache
     from instacalendar.config import AppPaths
-    from instacalendar.models import EventDraft, ExtractionResult
+    from instacalendar.models import EventDraft, ExtractionResult, InstagramPost
 
     monkeypatch.setenv("INSTACALENDAR_HOME", str(tmp_path))
     cache = Cache(AppPaths.from_base(tmp_path).cache_file)
@@ -39,6 +39,17 @@ def test_cli_cache_events_shows_cached_extractions(tmp_path: Path, monkeypatch) 
         text_model="text",
         vision_model="vision",
         video_model="video",
+    )
+    cache.upsert_cached_post(
+        collection_name="Concerts",
+        post=InstagramPost(
+            media_pk="media-1",
+            shortcode="abc123",
+            caption="",
+            media_kind="8",
+        ),
+        fetched_at=datetime(2026, 4, 26, 11, 0, tzinfo=ZoneInfo("UTC")),
+        media=[],
     )
     cache.record_extraction_result(
         media_pk="media-1",
@@ -50,13 +61,16 @@ def test_cli_cache_events_shows_cached_extractions(tmp_path: Path, monkeypatch) 
                 EventDraft(
                     title="Club Night",
                     start=datetime(2026, 5, 3, 20, 0, tzinfo=ZoneInfo("UTC")),
+                    location_name="The Room",
                 ),
                 EventDraft(
                     title="Day Party",
                     start=datetime(2026, 5, 4, 14, 0, tzinfo=ZoneInfo("UTC")),
+                    location_name="The Garden",
+                    source_url="https://www.instagram.com/p/event-url/",
                 ),
             ],
-            model_ids=["text"],
+            model_ids=["vision"],
             confidence=0.9,
             warnings=["low resolution"],
         ),
@@ -73,10 +87,21 @@ def test_cli_cache_events_shows_cached_extractions(tmp_path: Path, monkeypatch) 
     result = CliRunner().invoke(app, ["cache", "events"])
 
     assert result.exit_code == 0
-    assert "Media PK" in result.stdout
-    assert "media-1" in result.stdout
-    assert "media-2" in result.stdout
-    assert "Club Night, Day Party" in result.stdout
+    assert "Event" in result.stdout
+    assert "Location" in result.stdout
+    assert "Media PK" not in result.stdout
+    assert "media-1" not in result.stdout
+    assert "media-2" not in result.stdout
+    assert "Club Night" in result.stdout
+    assert "Day Party" in result.stdout
+    assert "The Room" in result.stdout
+    assert "The Garden" in result.stdout
+    assert "2026-04-26 12:00" in result.stdout
+    assert "2026-04-26T12:00:00+00:00" not in result.stdout
+    assert "vision" in result.stdout
+    assert model_sig not in result.stdout
+    assert "https://www.instagram.com/p/abc123/" in result.stdout
+    assert "https://www.instagram.com/p/event-url/" in result.stdout
     assert "not_event" in result.stdout
 
 

@@ -241,26 +241,27 @@ def cache_events() -> None:
         console.print("No extracted events recorded")
         return
     table = Table()
-    table.add_column("Media PK")
-    table.add_column("Model")
+    table.add_column("Event")
+    table.add_column("Location")
     table.add_column("Media Kind")
     table.add_column("Extracted At")
     table.add_column("Status")
-    table.add_column("Events")
+    table.add_column("Model")
     table.add_column("Warnings", justify="right")
+    table.add_column("Post URL")
     for ex in extractions:
-        events_text = ", ".join(ex.event_titles)
-        if len(events_text) > 40:
-            events_text = events_text[:37] + "..."
-        table.add_row(
-            ex.media_pk,
-            ex.model_signature,
-            ex.source_media_kind,
-            ex.extracted_at,
-            ex.status,
-            events_text,
-            str(ex.warnings_count),
-        )
+        event_count = max(ex.event_count, 1)
+        for index in range(event_count):
+            table.add_row(
+                _list_value(ex.event_titles, index),
+                _list_value(ex.event_locations, index),
+                ex.source_media_kind,
+                _format_minute_timestamp(ex.extracted_at),
+                ex.status,
+                ex.display_model,
+                str(ex.warnings_count),
+                _list_value(ex.event_source_urls, index),
+            )
     console.print(table)
 
 
@@ -367,6 +368,20 @@ def _format_file_counts(file_counts: dict[str, int]) -> str:
         return "0 files"
     parts = [f"{kind}: {file_counts[kind]}" for kind in sorted(file_counts)]
     return ", ".join(parts)
+
+
+def _list_value(values: list[str], index: int) -> str:
+    if index >= len(values):
+        return ""
+    return values[index]
+
+
+def _format_minute_timestamp(value: str) -> str:
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return value[:16]
+    return parsed.strftime("%Y-%m-%d %H:%M")
 
 
 def _print_extraction_cost_summary(summary: RunSummary) -> None:

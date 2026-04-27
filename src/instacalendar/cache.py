@@ -78,11 +78,14 @@ class CacheInfo:
 class CachedExtraction:
     media_pk: str
     model_signature: str
+    display_model: str
     source_media_kind: str
     extracted_at: str
     status: str
     event_count: int
     event_titles: list[str]
+    event_locations: list[str]
+    event_source_urls: list[str]
     warnings_count: int
 
 
@@ -324,24 +327,68 @@ class Cache:
                 ORDER BY extracted_at DESC
                 """
             ).fetchall()
+            post_rows = conn.execute(
+                """
+                SELECT media_pk, post_json
+                FROM cached_posts
+                """
+            ).fetchall()
+        post_urls = {}
+        for media_pk, post_json in post_rows:
+            data = json.loads(post_json)
+            shortcode = data.get("shortcode")
+            if shortcode:
+                post_urls[media_pk] = f"https://www.instagram.com/p/{shortcode}/"
         extractions = []
         for media_pk, model_signature, source_media_kind, result_json, extracted_at in rows:
             data = json.loads(result_json)
             events = data.get("events") or []
             event_titles = [e.get("title") or "" for e in events]
+            event_locations = [
+                self._event_location(e.get("location_name"), e.get("location_address"))
+                for e in events
+            ]
+            post_url = post_urls.get(media_pk, "")
+            event_source_urls = [e.get("source_url") or post_url for e in events]
+            if not events and post_url:
+                event_source_urls = [post_url]
             extractions.append(
                 CachedExtraction(
                     media_pk=media_pk,
                     model_signature=model_signature,
+                    display_model=self._display_model(
+                        data.get("model_ids") or [], model_signature, source_media_kind
+                    ),
                     source_media_kind=source_media_kind,
                     extracted_at=extracted_at,
                     status=data.get("status") or "",
                     event_count=len(events),
                     event_titles=event_titles,
+                    event_locations=event_locations,
+                    event_source_urls=event_source_urls,
                     warnings_count=len(data.get("warnings") or []),
                 )
             )
         return extractions
+
+    def _event_location(self, name: str | None, address: str | None) -> str:
+        if name and address:
+            return f"{name} - {address}"
+        return name or address or ""
+
+    def _display_model(
+        self, model_ids: list[str], model_signature: str, source_media_kind: str
+    ) -> str:
+        if model_ids:
+            return model_ids[0]
+        try:
+            models = json.loads(model_signature)
+        except json.JSONDecodeError:
+            return model_signature
+        model_key = {"text": "text", "image": "vision", "video": "video"}.get(source_media_kind)
+        if model_key is None:
+            return model_signature
+        return str(models.get(model_key) or "")
 
     def upsert_cached_post(
         self,
