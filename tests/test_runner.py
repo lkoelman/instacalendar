@@ -13,7 +13,6 @@ from instacalendar.models import (
 )
 from instacalendar.runner import AppRunner
 
-
 GEMINI_FLASH_MODEL = "google/gemini-3-flash-preview"
 
 
@@ -171,6 +170,42 @@ def test_configure_defaults_all_openrouter_models_to_gemini_flash(
     assert config.openrouter_text_model == GEMINI_FLASH_MODEL
     assert config.openrouter_vision_model == GEMINI_FLASH_MODEL
     assert config.openrouter_video_model == GEMINI_FLASH_MODEL
+
+
+def test_configure_authenticates_google_when_requested(tmp_path: Path, monkeypatch) -> None:
+    authorize = Mock()
+    monkeypatch.setattr("instacalendar.runner.authorize_google_calendar", authorize)
+    runner = AppRunner(AppPaths.from_base(tmp_path), FakePrompt(confirm_answer=True))
+
+    runner.configure(
+        instagram_username="musicfan",
+        instagram_password="instagram-secret",
+        openrouter_api_key="openrouter-secret",
+        openrouter_text_model="text",
+        openrouter_vision_model="vision",
+        default_export="google",
+        authenticate_google=True,
+    )
+
+    authorize.assert_called_once_with(runner.paths)
+
+
+def test_configure_skips_google_auth_when_declined(tmp_path: Path, monkeypatch) -> None:
+    authorize = Mock()
+    monkeypatch.setattr("instacalendar.runner.authorize_google_calendar", authorize)
+    runner = AppRunner(AppPaths.from_base(tmp_path), FakePrompt(confirm_answer=True))
+
+    runner.configure(
+        instagram_username="musicfan",
+        instagram_password="instagram-secret",
+        openrouter_api_key="openrouter-secret",
+        openrouter_text_model="text",
+        openrouter_vision_model="vision",
+        default_export="google",
+        authenticate_google=False,
+    )
+
+    authorize.assert_not_called()
 
 
 def test_configure_preserves_existing_openrouter_models(tmp_path: Path) -> None:

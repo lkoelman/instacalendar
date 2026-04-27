@@ -148,7 +148,7 @@ Key technologies: Google Calendar API event JSON, private extended properties.
 
 ### `src/instacalendar/google_auth.py`
 
-Builds an authenticated Google Calendar v3 service. It loads existing OAuth credentials from the app data directory, refreshes them when possible, or starts an installed-app OAuth local server flow. OAuth client configuration must come from `GOOGLE_OAUTH_CLIENT_JSON` or `GOOGLE_OAUTH_CLIENT_FILE`.
+Builds an authenticated Google Calendar v3 service and can authorize Google Calendar during setup. It loads existing OAuth credentials from the app data directory, refreshes them when possible, or starts an installed-app OAuth local server flow. OAuth client configuration comes from development override environment variables or a bundled Instacalendar desktop OAuth client when one is packaged.
 
 Key technologies: google-auth-oauthlib, google-api-python-client.
 
@@ -300,8 +300,9 @@ External services are mocked or faked. The current test suite does not perform l
 - Vision extraction can use local cached image files by encoding them as data URLs. Cached videos are not analyzed.
 - Instagram collection fetching uses lower-level paged chunk calls to avoid earlier `instagrapi` argument compatibility issues and to tolerate later-page 572 errors.
 - `.ics` is the only file export format implemented.
-- Google export requires a user-provided desktop OAuth client through environment variables; the repository does not ship OAuth client credentials.
-- Google scopes currently include both `calendar.events` and full `calendar`, even though narrower scopes may be sufficient for the implemented event insertion flow.
+- Google export supports setup-time browser authentication through `instacalendar init --default-export google --google-auth`.
+- Release builds should include a maintainer-owned desktop OAuth client; development and private forks can still provide `GOOGLE_OAUTH_CLIENT_JSON` or `GOOGLE_OAUTH_CLIENT_FILE`.
+- Google OAuth uses the `calendar.events` scope.
 
 ## Known Tech Debt & Future Roadmap
 

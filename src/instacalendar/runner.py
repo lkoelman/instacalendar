@@ -17,6 +17,7 @@ from instacalendar.config import AppConfig, AppPaths, ConfigStore
 from instacalendar.exporters.google import GoogleCalendarExporter
 from instacalendar.exporters.ics import IcsExporter
 from instacalendar.extractors.openrouter import ModelUsage, OpenRouterExtractor
+from instacalendar.google_auth import authorize_google_calendar
 from instacalendar.instagram import LiveInstagramClient
 from instacalendar.models import (
     EventDraft,
@@ -154,6 +155,7 @@ class AppRunner:
         openrouter_video_model: str | None = None,
         default_export: str | None = None,
         google_calendar_id: str | None = None,
+        authenticate_google: bool | None = None,
     ) -> AppConfig:
         existing = self.config_store.load()
         video_model = openrouter_video_model or existing.openrouter_video_model
@@ -188,6 +190,9 @@ class AppRunner:
             "openrouter_api_key",
             self._resolve_openrouter_api_key(openrouter_api_key),
         )
+        if authenticate_google is True:
+            with self.progress.status("Authenticating with Google Calendar ..."):
+                authorize_google_calendar(self.paths)
         return config
 
     def run(

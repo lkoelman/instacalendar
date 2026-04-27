@@ -164,6 +164,48 @@ def test_cli_cache_info_shows_location_totals_and_collection_breakdown(
     assert "Images" in result.stdout
 
 
+def test_cli_init_passes_google_auth_flag(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("INSTACALENDAR_HOME", str(tmp_path))
+    calls = []
+
+    class FakeAppRunner:
+        def __init__(self, *args, **kwargs) -> None:
+            return None
+
+        def configure(self, **kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(default_export="google")
+
+    monkeypatch.setattr("instacalendar.cli.AppRunner", FakeAppRunner)
+
+    result = CliRunner().invoke(app, ["init", "--default-export", "google", "--google-auth"])
+
+    assert result.exit_code == 0
+    assert calls[0]["authenticate_google"] is True
+
+
+def test_cli_init_passes_no_google_auth_flag(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("INSTACALENDAR_HOME", str(tmp_path))
+    calls = []
+
+    class FakeAppRunner:
+        def __init__(self, *args, **kwargs) -> None:
+            return None
+
+        def configure(self, **kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(default_export="google")
+
+    monkeypatch.setattr("instacalendar.cli.AppRunner", FakeAppRunner)
+
+    result = CliRunner().invoke(
+        app, ["init", "--default-export", "google", "--no-google-auth"]
+    )
+
+    assert result.exit_code == 0
+    assert calls[0]["authenticate_google"] is False
+
+
 def test_cli_init_writes_config(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("INSTACALENDAR_HOME", str(tmp_path))
     result = CliRunner().invoke(

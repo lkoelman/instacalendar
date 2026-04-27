@@ -138,6 +138,13 @@ def init(
     openrouter_video_model: Annotated[str | None, typer.Option()] = None,
     default_export: Annotated[str, typer.Option()] = "ics",
     google_calendar_id: Annotated[str | None, typer.Option()] = None,
+    authenticate_google: Annotated[
+        bool | None,
+        typer.Option(
+            "--google-auth/--no-google-auth",
+            help="Run or skip Google Calendar browser authentication during setup",
+        ),
+    ] = None,
 ) -> None:
     if default_export not in {"ics", "google"}:
         raise typer.BadParameter("default export must be 'ics' or 'google'")
@@ -150,6 +157,7 @@ def init(
         openrouter_video_model=openrouter_video_model,
         default_export=default_export,
         google_calendar_id=google_calendar_id,
+        authenticate_google=authenticate_google,
     )
     console.print(f"Saved configuration to {_paths().config_file}")
 

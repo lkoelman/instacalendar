@@ -57,8 +57,20 @@ that value before prompting you to type one.
 Secrets are stored in the operating system keyring. Instagram session settings are stored
 under the app data directory to avoid repeated logins.
 
-For Google Calendar export, set one of these environment variables before
-running:
+For Google Calendar export, authenticate during setup:
+
+```bash
+uv run instacalendar init --default-export google --google-auth
+```
+
+The command opens a Google consent link in your browser and stores the resulting
+OAuth token under the app data directory. Later Google Calendar exports reuse
+and refresh that token when possible.
+
+Release builds can ship an Instacalendar desktop OAuth client so normal users do
+not need to create Google Cloud credentials. For development, private forks, or
+builds without a bundled OAuth client, set one of these environment variables
+before running `--google-auth`:
 
 ```bash
 export GOOGLE_OAUTH_CLIENT_FILE=/path/to/oauth-client.json
@@ -66,8 +78,8 @@ export GOOGLE_OAUTH_CLIENT_FILE=/path/to/oauth-client.json
 export GOOGLE_OAUTH_CLIENT_JSON='{"installed": ... }'
 ```
 
-The OAuth client must be a Google desktop app. The app requests Calendar scopes
-needed to list calendars and insert events.
+The OAuth client must be a Google desktop app. The app requests the
+`calendar.events` scope needed to read and write calendar events.
 
 ## Run
 
