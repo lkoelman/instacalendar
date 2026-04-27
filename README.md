@@ -35,19 +35,19 @@ uv run --upgrade-package instagrapi instacalendar <command>
 Run the guided setup:
 
 ```bash
-uv run instacalendar auth
+uv run instacalendar init
 ```
 
 Or provide values non-interactively:
 
 ```bash
-uv run instacalendar auth \
+uv run instacalendar init \
   --instagram-username your_user \
   --instagram-password your_password \
   --openrouter-api-key sk-or-v1-... \
-  --openrouter-text-model openai/gpt-4o-mini \
-  --openrouter-vision-model openai/gpt-4o \
-  --openrouter-video-model google/gemini-2.5-flash \
+  --openrouter-text-model google/gemini-3-flash-preview \
+  --openrouter-vision-model google/gemini-3-flash-preview \
+  --openrouter-video-model google/gemini-3-flash-preview \
   --default-export ics
 ```
 

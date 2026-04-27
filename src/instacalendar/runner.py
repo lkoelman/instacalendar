@@ -27,6 +27,8 @@ from instacalendar.models import (
 )
 from instacalendar.secrets import SecretStore
 
+DEFAULT_OPENROUTER_MODEL = "google/gemini-3-flash-preview"
+
 
 class Prompt(Protocol):
     def text(self, message: str, *, default: str | None = None, password: bool = False) -> str: ...
@@ -154,17 +156,26 @@ class AppRunner:
         google_calendar_id: str | None = None,
     ) -> AppConfig:
         existing = self.config_store.load()
+        video_model = openrouter_video_model or existing.openrouter_video_model
+        if video_model is None and (
+            openrouter_text_model is not None or openrouter_vision_model is not None
+        ):
+            video_model = DEFAULT_OPENROUTER_MODEL
+        if video_model is None:
+            video_model = self.prompt.text(
+                "OpenRouter video model", default=DEFAULT_OPENROUTER_MODEL
+            )
         config = AppConfig(
             instagram_username=instagram_username
             or existing.instagram_username
             or self.prompt.text("Instagram username"),
             openrouter_text_model=openrouter_text_model
             or existing.openrouter_text_model
-            or self.prompt.text("OpenRouter text model", default="openai/gpt-4o-mini"),
+            or self.prompt.text("OpenRouter text model", default=DEFAULT_OPENROUTER_MODEL),
             openrouter_vision_model=openrouter_vision_model
             or existing.openrouter_vision_model
-            or self.prompt.text("OpenRouter vision model", default="openai/gpt-4o"),
-            openrouter_video_model=openrouter_video_model or existing.openrouter_video_model,
+            or self.prompt.text("OpenRouter vision model", default=DEFAULT_OPENROUTER_MODEL),
+            openrouter_video_model=video_model,
             default_export=(default_export or existing.default_export),  # type: ignore[arg-type]
             google_calendar_id=google_calendar_id or existing.google_calendar_id,
         )
@@ -616,4 +627,4 @@ class AppRunner:
         if not config.openrouter_vision_model:
             missing.append("openrouter_vision_model")
         if missing:
-            raise RuntimeError(f"Missing configuration: {', '.join(missing)}. Run auth first.")
+            raise RuntimeError(f"Missing configuration: {', '.join(missing)}. Run init first.")

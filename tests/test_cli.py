@@ -164,12 +164,12 @@ def test_cli_cache_info_shows_location_totals_and_collection_breakdown(
     assert "Images" in result.stdout
 
 
-def test_cli_auth_writes_config(tmp_path: Path, monkeypatch) -> None:
+def test_cli_init_writes_config(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("INSTACALENDAR_HOME", str(tmp_path))
     result = CliRunner().invoke(
         app,
         [
-            "auth",
+            "init",
             "--instagram-username",
             "musicfan",
             "--instagram-password",
@@ -189,14 +189,15 @@ def test_cli_auth_writes_config(tmp_path: Path, monkeypatch) -> None:
     assert "Saved configuration" in result.stdout
 
 
-def test_cli_auth_accepts_openrouter_video_model(tmp_path: Path, monkeypatch) -> None:
+
+def test_cli_init_accepts_openrouter_video_model(tmp_path: Path, monkeypatch) -> None:
     from instacalendar.config import AppPaths, ConfigStore
 
     monkeypatch.setenv("INSTACALENDAR_HOME", str(tmp_path))
     result = CliRunner().invoke(
         app,
         [
-            "auth",
+            "init",
             "--instagram-username",
             "musicfan",
             "--instagram-password",

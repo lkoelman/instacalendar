@@ -129,7 +129,7 @@ def main(
 
 
 @app.command()
-def auth(
+def init(
     instagram_username: Annotated[str | None, typer.Option()] = None,
     instagram_password: Annotated[str | None, typer.Option()] = None,
     openrouter_api_key: Annotated[str | None, typer.Option()] = None,

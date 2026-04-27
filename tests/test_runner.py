@@ -2,7 +2,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from unittest.mock import Mock
 
-from instacalendar.config import AppPaths
+from instacalendar.config import AppConfig, AppPaths, ConfigStore
 from instacalendar.extractors.openrouter import ModelUsage
 from instacalendar.models import (
     EventDraft,
@@ -12,6 +12,9 @@ from instacalendar.models import (
     VideoReference,
 )
 from instacalendar.runner import AppRunner
+
+
+GEMINI_FLASH_MODEL = "google/gemini-3-flash-preview"
 
 
 class FakePrompt:
@@ -151,6 +154,68 @@ def test_configure_prompts_for_openrouter_key_when_environment_key_declined(
     assert prompt.confirm_messages == ["Use OPENROUTER_API_KEY from your environment?"]
     assert "OpenRouter API key" in prompt.text_messages
     assert runner.secret_store.get("openrouter_api_key") == "typed-openrouter-key"
+
+
+def test_configure_defaults_all_openrouter_models_to_gemini_flash(
+    tmp_path: Path,
+) -> None:
+    prompt = FakePrompt(confirm_answer=True)
+    runner = AppRunner(AppPaths.from_base(tmp_path), prompt)
+
+    config = runner.configure(
+        instagram_username="musicfan",
+        instagram_password="instagram-secret",
+        openrouter_api_key="openrouter-secret",
+    )
+
+    assert config.openrouter_text_model == GEMINI_FLASH_MODEL
+    assert config.openrouter_vision_model == GEMINI_FLASH_MODEL
+    assert config.openrouter_video_model == GEMINI_FLASH_MODEL
+
+
+def test_configure_preserves_existing_openrouter_models(tmp_path: Path) -> None:
+    runner = AppRunner(AppPaths.from_base(tmp_path), FakePrompt(confirm_answer=True))
+    runner.configure(
+        instagram_username="musicfan",
+        instagram_password="instagram-secret",
+        openrouter_api_key="openrouter-secret",
+        openrouter_text_model="existing-text",
+        openrouter_vision_model="existing-vision",
+        openrouter_video_model="existing-video",
+    )
+
+    config = runner.configure(
+        instagram_password="instagram-secret",
+        openrouter_api_key="openrouter-secret",
+    )
+
+    assert config.openrouter_text_model == "existing-text"
+    assert config.openrouter_vision_model == "existing-vision"
+    assert config.openrouter_video_model == "existing-video"
+
+
+def test_configure_cli_model_options_override_existing_models(tmp_path: Path) -> None:
+    runner = AppRunner(AppPaths.from_base(tmp_path), FakePrompt(confirm_answer=True))
+    runner.configure(
+        instagram_username="musicfan",
+        instagram_password="instagram-secret",
+        openrouter_api_key="openrouter-secret",
+        openrouter_text_model="existing-text",
+        openrouter_vision_model="existing-vision",
+        openrouter_video_model="existing-video",
+    )
+
+    config = runner.configure(
+        instagram_password="instagram-secret",
+        openrouter_api_key="openrouter-secret",
+        openrouter_text_model="new-text",
+        openrouter_vision_model="new-vision",
+        openrouter_video_model="new-video",
+    )
+
+    assert config.openrouter_text_model == "new-text"
+    assert config.openrouter_vision_model == "new-vision"
+    assert config.openrouter_video_model == "new-video"
 
 
 def test_run_reports_progress_for_instagram_extraction_and_export(
@@ -510,13 +575,15 @@ def test_run_uses_vision_model_for_video_when_config_has_no_video_model(
     tmp_path: Path, monkeypatch
 ) -> None:
     runner = AppRunner(AppPaths.from_base(tmp_path), FakePrompt(confirm_answer=True))
-    runner.configure(
-        instagram_username="musicfan",
-        instagram_password="instagram-secret",
-        openrouter_api_key="openrouter-secret",
-        openrouter_text_model="text",
-        openrouter_vision_model="vision",
+    ConfigStore(runner.paths).save(
+        AppConfig(
+            instagram_username="musicfan",
+            openrouter_text_model="text",
+            openrouter_vision_model="vision",
+        )
     )
+    runner.secret_store.set("instagram_password", "instagram-secret")
+    runner.secret_store.set("openrouter_api_key", "openrouter-secret")
 
     class FakeInstagramClient:
         def __init__(self, username: str, password: str, session_file: Path) -> None:
@@ -867,7 +934,7 @@ def test_run_reuses_cached_extraction_result_without_calling_openrouter(
     model_signature = runner.cache.extraction_model_signature(
         text_model="text",
         vision_model="vision",
-        video_model="vision",
+        video_model=GEMINI_FLASH_MODEL,
     )
     runner.cache.record_extraction_result(
         media_pk="1",
@@ -930,7 +997,7 @@ def test_run_ignore_event_cache_forces_extraction_and_updates_cache(
     model_signature = runner.cache.extraction_model_signature(
         text_model="text",
         vision_model="vision",
-        video_model="vision",
+        video_model=GEMINI_FLASH_MODEL,
     )
     runner.cache.record_extraction_result(
         media_pk="1",
@@ -1006,7 +1073,7 @@ def test_run_default_event_cache_key_misses_when_models_change(
     old_signature = runner.cache.extraction_model_signature(
         text_model="text-v1",
         vision_model="vision",
-        video_model="vision",
+        video_model=GEMINI_FLASH_MODEL,
     )
     runner.cache.record_extraction_result(
         media_pk="1",
@@ -1060,7 +1127,7 @@ def test_run_post_media_event_cache_key_reuses_across_model_changes(
     old_signature = runner.cache.extraction_model_signature(
         text_model="text-v1",
         vision_model="vision",
-        video_model="vision",
+        video_model=GEMINI_FLASH_MODEL,
     )
     runner.cache.record_extraction_result(
         media_pk="1",
@@ -1137,7 +1204,7 @@ def test_run_does_not_cache_extraction_failures(tmp_path: Path, monkeypatch) -> 
     model_signature = runner.cache.extraction_model_signature(
         text_model="text",
         vision_model="vision",
-        video_model="vision",
+        video_model=GEMINI_FLASH_MODEL,
     )
     assert runner.cache.get_extraction_result(
         media_pk="1",

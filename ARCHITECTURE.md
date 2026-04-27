@@ -58,7 +58,7 @@ graph LR
 
 ### `src/instacalendar/cli.py`
 
-Owns the public command surface. It defines the root Typer app, `auth`, `run`, and `cache` commands, plus the default guided wizard path when no subcommand is supplied. It adapts `questionary` prompts and `rich` progress spinners to the `Prompt` and `Progress` protocols consumed by `AppRunner`.
+Owns the public command surface. It defines the root Typer app, `init`, `run`, and `cache` commands, plus the default guided wizard path when no subcommand is supplied. It adapts `questionary` prompts and `rich` progress spinners to the `Prompt` and `Progress` protocols consumed by `AppRunner`.
 
 Key technologies: Typer, Questionary, Rich.
 
@@ -89,7 +89,7 @@ Key technologies: Pydantic v2.
 
 Resolves application paths and stores non-secret configuration. `AppPaths.default()` uses `INSTACALENDAR_HOME` when set; otherwise it uses platform-specific user config and data directories from `platformdirs`. `ConfigStore` reads and writes `config.json`.
 
-Configured values are Instagram username, OpenRouter text model, OpenRouter vision model, optional OpenRouter video model, default export destination, and optional Google Calendar ID. If no video model is configured, video fallback uses the configured vision model.
+Configured values are Instagram username, OpenRouter text model, OpenRouter vision model, OpenRouter video model, default export destination, and optional Google Calendar ID. If no video model is configured in older config files, video fallback uses the configured vision model.
 
 Key technologies: platformdirs, Pydantic, JSON files.
 
@@ -156,7 +156,7 @@ Key technologies: google-auth-oauthlib, google-api-python-client.
 
 ### Configure Flow
 
-1. A user runs `instacalendar auth` or starts the root guided command.
+1. A user runs `instacalendar init` or starts the root guided command.
 2. `cli.py` creates `AppRunner(AppPaths.default(), QuestionaryPrompt(), RichProgress())`.
 3. `AppRunner.configure()` loads existing config and prompts for missing values.
 4. Non-secret values are saved to `config.json`.
@@ -166,7 +166,7 @@ Key technologies: google-auth-oauthlib, google-api-python-client.
 ### Run Flow
 
 1. `AppRunner.run()` initializes the SQLite cache and loads config/secrets.
-2. Missing required config raises a runtime error instructing the user to run auth first.
+2. Missing required config raises a runtime error instructing the user to run init first.
 3. Instagram credentials are resolved, and the session file is reused when present.
 4. If no collection was passed, Instagram collection names are fetched and the user selects one.
 5. Posts are fetched, normalized to `InstagramPost`, optionally filtered by `--posted-since`, then capped by `--limit`.
@@ -194,7 +194,7 @@ There is no asynchronous job queue, pub/sub system, server process, or backgroun
 ### Public CLI Interface
 
 - `instacalendar`: runs the guided wizard, including setup and export.
-- `instacalendar auth`: saves Instagram, OpenRouter, export, and optional Google calendar settings.
+- `instacalendar init`: saves Instagram, OpenRouter, export, and optional Google calendar settings.
 - `instacalendar run`: executes export with saved configuration and optional `--collection`, `--ics-output`, `--posted-since`, `--limit`, `--from-cache`, `--ignore-event-cache`, and `--event-cache-key`.
 - `instacalendar cache calendar`: prints recorded exports.
 - `instacalendar cache events`: prints cached event extraction results.
@@ -285,7 +285,7 @@ Tests live in `tests/` and focus on adapter boundaries plus orchestration behavi
 - `test_ics_exporter.py`: `.ics` UID, location, description, performers, and source URL output.
 - `test_google_exporter.py`: duplicate-safe Google Calendar event body construction.
 - `test_runner.py`: configuration prompts, environment key use, progress messages, post filtering, limits, and extraction-cache reuse with fake adapters.
-- `test_cli.py`: CLI command routing, cache behavior, auth config writes, and option validation.
+- `test_cli.py`: CLI command routing, cache behavior, init config writes, and option validation.
 
 External services are mocked or faked. The current test suite does not perform live Instagram, OpenRouter, Google OAuth, Google Calendar, keyring, or full terminal interaction tests.
 
