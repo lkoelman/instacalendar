@@ -32,6 +32,8 @@ class IcsExporter:
             if draft.source_url:
                 description = f"{description}\n\nSource: {draft.source_url}".strip()
                 event.add("url", vCalAddress(draft.source_url))
+            if draft.poster_profile_url:
+                description = f"{description}\n\nPosted by: {draft.poster_profile_url}".strip()
             if description:
                 event.add("description", description)
             calendar.add_component(event)

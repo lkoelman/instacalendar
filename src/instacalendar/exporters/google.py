@@ -59,6 +59,8 @@ class GoogleCalendarExporter:
             parts.append(f"Performers: {', '.join(draft.performers)}")
         if draft.source_url:
             parts.append(f"Source: {draft.source_url}")
+        if draft.poster_profile_url:
+            parts.append(f"Posted by: {draft.poster_profile_url}")
         return "\n\n".join(part for part in parts if part)
 
     def _datetime_value(self, value: datetime | None) -> str:

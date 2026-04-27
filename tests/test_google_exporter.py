@@ -13,6 +13,7 @@ def test_google_exporter_builds_duplicate_safe_event_body() -> None:
         timezone="America/New_York",
         location_name="The Room",
         source_url="https://www.instagram.com/p/abc/",
+        poster_profile_url="https://www.instagram.com/venue/",
     )
 
     body = GoogleCalendarExporter(service=None).build_event_body("uid-1", draft)
@@ -23,3 +24,4 @@ def test_google_exporter_builds_duplicate_safe_event_body() -> None:
     assert body["location"] == "The Room"
     assert body["extendedProperties"]["private"]["instacalendar_uid"] == "uid-1"
     assert "Source: https://www.instagram.com/p/abc/" in body["description"]
+    assert "Posted by: https://www.instagram.com/venue/" in body["description"]

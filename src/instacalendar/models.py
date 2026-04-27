@@ -40,6 +40,15 @@ class InstagramPost(BaseModel):
             return None
         return f"https://www.instagram.com/p/{self.shortcode}/"
 
+    @property
+    def poster_profile_url(self) -> str | None:
+        if not self.poster_username:
+            return None
+        username = self.poster_username.removeprefix("@").strip("/")
+        if not username:
+            return None
+        return f"https://www.instagram.com/{username}/"
+
 
 class EventDraft(BaseModel):
     """Candidate calendar event inferred from an Instagram post."""
@@ -54,6 +63,7 @@ class EventDraft(BaseModel):
     description: str = ""
     performers: list[str] = Field(default_factory=list)
     source_url: str | None = None
+    poster_profile_url: str | None = None
     confidence: float | None = None
     missing_fields: list[str] = Field(default_factory=list)
     evidence: list[str] = Field(default_factory=list)

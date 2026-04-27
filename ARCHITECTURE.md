@@ -77,7 +77,7 @@ Defines the Pydantic contracts shared across adapters:
 - `ImageReference`: remote or local image URI and optional MIME type.
 - `VideoReference`: remote or local video URI and optional MIME type.
 - `InstagramPost`: normalized Instagram media metadata sent to extraction, including the poster username when Instagram provides it.
-- `EventDraft`: candidate event data reviewed by the user and exported.
+- `EventDraft`: candidate event data reviewed by the user and exported, including source post and poster profile links when available.
 - `ExtractionResult`: structured model output for one Instagram post.
 - `ExportRecord`: typed export metadata contract.
 
@@ -134,13 +134,13 @@ Key technologies: LiteLLM, OpenRouter chat completions, Pydantic structured outp
 
 ### `src/instacalendar/exporters/ics.py`
 
-Writes approved events to a local `.ics` file. The exporter creates a single iCalendar document with stable UIDs, summary, start/end, location, description, performers, and source URL where available.
+Writes approved events to a local `.ics` file. The exporter creates a single iCalendar document with stable UIDs, summary, start/end, location, description, performers, source URL, and poster profile URL where available.
 
 Key technologies: icalendar.
 
 ### `src/instacalendar/exporters/google.py`
 
-Builds Google Calendar event bodies from `EventDraft` and inserts only when missing. Duplicate detection uses a private extended property named `instacalendar_uid`; `insert_if_missing()` queries that property before calling `events().insert()`.
+Builds Google Calendar event bodies from `EventDraft`, including source post and poster profile links in the description, and inserts only when missing. Duplicate detection uses a private extended property named `instacalendar_uid`; `insert_if_missing()` queries that property before calling `events().insert()`.
 
 Timed events use `dateTime` and optional `timeZone`. All-day events use `date`.
 
@@ -233,6 +233,7 @@ No webhooks or inbound network API are exposed by this application. The only lis
 - OpenRouter responses: structured message content validated into `ExtractionResult`.
 - ICS export: iCalendar 2.0 bytes written by the `icalendar` package.
 - Google export: Google Calendar API JSON event bodies.
+- Exported event descriptions include source post links and poster profile links when Instagram provides them.
 
 ## Cross-Cutting Concerns
 

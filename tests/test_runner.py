@@ -499,6 +499,65 @@ def test_run_reports_completed_post_with_event_source_and_details(
     ]
 
 
+def test_run_adds_instagram_post_metadata_to_exported_drafts(
+    tmp_path: Path, monkeypatch
+) -> None:
+    runner = AppRunner(AppPaths.from_base(tmp_path), FakePrompt(confirm_answer=True))
+    runner.configure(
+        instagram_username="musicfan",
+        instagram_password="instagram-secret",
+        openrouter_api_key="openrouter-secret",
+        openrouter_text_model="text",
+        openrouter_vision_model="vision",
+    )
+
+    class FakeInstagramClient:
+        def __init__(self, username: str, password: str, session_file: Path) -> None:
+            return None
+
+        def authenticate(self) -> None:
+            return None
+
+        def list_collections(self) -> list[str]:
+            return ["Concerts"]
+
+        def fetch_collection_posts(self, collection_name: str) -> list[InstagramPost]:
+            return [
+                InstagramPost(
+                    media_pk="1",
+                    poster_username="venue",
+                    shortcode="abc123",
+                    caption="Live Set",
+                    media_kind="image",
+                )
+            ]
+
+    fake_extractor = Mock()
+    fake_extractor.extract.return_value = ExtractionResult(
+        status="event",
+        events=[
+            EventDraft(
+                title="Live Set",
+                start=datetime(2026, 5, 3, 20, 0, tzinfo=UTC),
+            )
+        ],
+    )
+    fake_exporter = Mock()
+    fake_exporter.export.return_value = []
+    monkeypatch.setattr("instacalendar.runner.LiveInstagramClient", FakeInstagramClient)
+    monkeypatch.setattr(
+        "instacalendar.runner.OpenRouterExtractor",
+        lambda **kwargs: fake_extractor,
+    )
+    monkeypatch.setattr("instacalendar.runner.IcsExporter", lambda: fake_exporter)
+
+    runner.run(ics_output=tmp_path / "events.ics")
+
+    exported_draft = fake_exporter.export.call_args.args[1][0][1]
+    assert exported_draft.source_url == "https://www.instagram.com/p/abc123/"
+    assert exported_draft.poster_profile_url == "https://www.instagram.com/venue/"
+
+
 def test_run_reports_completed_post_from_video_fallback(tmp_path: Path, monkeypatch) -> None:
     paths = AppPaths.from_base(tmp_path)
     progress = FakeProgress()

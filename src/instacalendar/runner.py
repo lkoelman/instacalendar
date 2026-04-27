@@ -333,6 +333,7 @@ class AppRunner:
                     )
                 )
                 progress_task.advance()
+                self._apply_post_metadata(result, post)
                 for index, draft in enumerate(result.events):
                     uid = self.cache.stable_uid(
                         post.media_pk,
@@ -414,6 +415,12 @@ class AppRunner:
             f"Confidence: {draft.confidence if draft.confidence is not None else 'unknown'}",
         ]
         return draft.is_exportable and self.prompt.confirm("\n".join(lines), default=True)
+
+    def _apply_post_metadata(self, result: ExtractionResult, post: InstagramPost) -> None:
+        for draft in result.events:
+            if not draft.source_url:
+                draft.source_url = post.source_url
+            draft.poster_profile_url = post.poster_profile_url
 
     def _post_extraction_summary(
         self,
