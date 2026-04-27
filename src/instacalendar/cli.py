@@ -210,8 +210,8 @@ def run(
     _print_extraction_cost_summary(summary)
 
 
-@cache_app.command("list-events")
-def cache_list_events() -> None:
+@cache_app.command("calendar", help="Show previously exported calendar events")
+def cache_calendar() -> None:
     cache = Cache(_paths().cache_file)
     cache.initialize()
     exports = cache.list_exports()
@@ -224,7 +224,39 @@ def cache_list_events() -> None:
         )
 
 
-@cache_app.command("list-posts")
+@cache_app.command("events", help="Show cached event extraction results")
+def cache_events() -> None:
+    cache = Cache(_paths().cache_file)
+    cache.initialize()
+    extractions = cache.list_cached_extractions()
+    if not extractions:
+        console.print("No extracted events recorded")
+        return
+    table = Table()
+    table.add_column("Media PK")
+    table.add_column("Model")
+    table.add_column("Media Kind")
+    table.add_column("Extracted At")
+    table.add_column("Status")
+    table.add_column("Events")
+    table.add_column("Warnings", justify="right")
+    for ex in extractions:
+        events_text = ", ".join(ex.event_titles)
+        if len(events_text) > 40:
+            events_text = events_text[:37] + "..."
+        table.add_row(
+            ex.media_pk,
+            ex.model_signature,
+            ex.source_media_kind,
+            ex.extracted_at,
+            ex.status,
+            events_text,
+            str(ex.warnings_count),
+        )
+    console.print(table)
+
+
+@cache_app.command("list-posts", help="Show cached Instagram posts and media status")
 def cache_list_posts(
     collection: Annotated[
         str | None, typer.Option(help="Only show cached posts from this collection")
@@ -263,7 +295,7 @@ def cache_list_posts(
     console.print(table)
 
 
-@cache_app.command("info")
+@cache_app.command("info", help="Show cache size and collection breakdown")
 def cache_info() -> None:
     paths = _paths()
     cache = Cache(paths.cache_file)
@@ -307,7 +339,7 @@ def cache_info() -> None:
     console.print(table)
 
 
-@cache_app.command("clear")
+@cache_app.command("clear", help="Delete all cached data and media files")
 def cache_clear(
     yes: Annotated[bool, typer.Option("--yes", help="Confirm cache deletion")] = False,
 ) -> None:

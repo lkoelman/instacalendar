@@ -196,7 +196,8 @@ There is no asynchronous job queue, pub/sub system, server process, or backgroun
 - `instacalendar`: runs the guided wizard, including setup and export.
 - `instacalendar auth`: saves Instagram, OpenRouter, export, and optional Google calendar settings.
 - `instacalendar run`: executes export with saved configuration and optional `--collection`, `--ics-output`, `--posted-since`, `--limit`, `--from-cache`, `--ignore-event-cache`, and `--event-cache-key`.
-- `instacalendar cache list-events`: prints recorded exports.
+- `instacalendar cache calendar`: prints recorded exports.
+- `instacalendar cache events`: prints cached event extraction results.
 - `instacalendar cache list-posts`: prints cached posts in a multi-column table.
 - `instacalendar cache info`: prints cache locations, total storage, and per-collection file counts/storage.
 - `instacalendar cache clear --yes`: deletes and reinitializes the local SQLite cache and cached media files.

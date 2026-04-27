@@ -1,0 +1,3 @@
+- when we run `cache --help|-h` we should get a list of commands _and_ a brief summary of what they do
+- `cache list-events` verb should be replaced by `cache calendar`
+- `cache events` should show the cache of extracted events

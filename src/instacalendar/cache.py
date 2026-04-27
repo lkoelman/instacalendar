@@ -74,6 +74,18 @@ class CacheInfo:
     collections: list[CacheCollectionInfo]
 
 
+@dataclass(frozen=True)
+class CachedExtraction:
+    media_pk: str
+    model_signature: str
+    source_media_kind: str
+    extracted_at: str
+    status: str
+    event_count: int
+    event_titles: list[str]
+    warnings_count: int
+
+
 class Cache:
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -301,6 +313,35 @@ class Cache:
                 """
             ).fetchall()
         return [CachedExport(*row) for row in rows]
+
+    def list_cached_extractions(self) -> list[CachedExtraction]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT media_pk, model_signature, source_media_kind,
+                       result_json, extracted_at
+                FROM cached_extractions
+                ORDER BY extracted_at DESC
+                """
+            ).fetchall()
+        extractions = []
+        for media_pk, model_signature, source_media_kind, result_json, extracted_at in rows:
+            data = json.loads(result_json)
+            events = data.get("events") or []
+            event_titles = [e.get("title") or "" for e in events]
+            extractions.append(
+                CachedExtraction(
+                    media_pk=media_pk,
+                    model_signature=model_signature,
+                    source_media_kind=source_media_kind,
+                    extracted_at=extracted_at,
+                    status=data.get("status") or "",
+                    event_count=len(events),
+                    event_titles=event_titles,
+                    warnings_count=len(data.get("warnings") or []),
+                )
+            )
+        return extractions
 
     def upsert_cached_post(
         self,

@@ -303,3 +303,57 @@ def test_cache_extraction_key_modes_control_model_and_media_matching(tmp_path: P
         source_media_kind="image",
         event_cache_key="model,media",
     ) is None
+
+
+def test_cache_lists_cached_extractions(tmp_path: Path) -> None:
+    cache = Cache(tmp_path / "cache.sqlite3")
+    cache.initialize()
+    model_sig = cache.extraction_model_signature(
+        text_model="text",
+        vision_model="vision",
+        video_model="video",
+    )
+    cache.record_extraction_result(
+        media_pk="media-1",
+        model_signature=model_sig,
+        source_media_kind="image",
+        result=ExtractionResult(
+            status="event",
+            events=[
+                EventDraft(
+                    title="Club Night",
+                    start=datetime(2026, 5, 3, 20, 0, tzinfo=ZoneInfo("UTC")),
+                ),
+                EventDraft(
+                    title="Day Party",
+                    start=datetime(2026, 5, 4, 14, 0, tzinfo=ZoneInfo("UTC")),
+                ),
+            ],
+            model_ids=["text"],
+            confidence=0.9,
+            warnings=["low resolution"],
+        ),
+        extracted_at=datetime(2026, 4, 26, 12, 0, tzinfo=ZoneInfo("UTC")),
+    )
+    cache.record_extraction_result(
+        media_pk="media-2",
+        model_signature=model_sig,
+        source_media_kind="text",
+        result=ExtractionResult(status="not_event", model_ids=["text"]),
+        extracted_at=datetime(2026, 4, 27, 12, 0, tzinfo=ZoneInfo("UTC")),
+    )
+
+    extractions = cache.list_cached_extractions()
+    assert len(extractions) == 2
+
+    assert extractions[0].media_pk == "media-2"
+    assert extractions[0].status == "not_event"
+    assert extractions[0].event_count == 0
+    assert extractions[0].event_titles == []
+    assert extractions[0].warnings_count == 0
+
+    assert extractions[1].media_pk == "media-1"
+    assert extractions[1].status == "event"
+    assert extractions[1].event_count == 2
+    assert extractions[1].event_titles == ["Club Night", "Day Party"]
+    assert extractions[1].warnings_count == 1

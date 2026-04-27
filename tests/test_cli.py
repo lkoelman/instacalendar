@@ -8,12 +8,76 @@ from instacalendar.cli import app
 from instacalendar.runner import ModelUsageTotal, RunSummary
 
 
-def test_cli_cache_list_initializes_empty_cache(tmp_path: Path, monkeypatch) -> None:
+def test_cli_cache_calendar_initializes_empty_cache(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("INSTACALENDAR_HOME", str(tmp_path))
-    result = CliRunner().invoke(app, ["cache", "list-events"])
+    result = CliRunner().invoke(app, ["cache", "calendar"])
 
     assert result.exit_code == 0
     assert "No exports recorded" in result.stdout
+
+
+def test_cli_cache_events_shows_empty_when_no_extractions(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("INSTACALENDAR_HOME", str(tmp_path))
+    result = CliRunner().invoke(app, ["cache", "events"])
+
+    assert result.exit_code == 0
+    assert "No extracted events recorded" in result.stdout
+
+
+def test_cli_cache_events_shows_cached_extractions(tmp_path: Path, monkeypatch) -> None:
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from instacalendar.cache import Cache
+    from instacalendar.config import AppPaths
+    from instacalendar.models import EventDraft, ExtractionResult
+
+    monkeypatch.setenv("INSTACALENDAR_HOME", str(tmp_path))
+    cache = Cache(AppPaths.from_base(tmp_path).cache_file)
+    cache.initialize()
+    model_sig = cache.extraction_model_signature(
+        text_model="text",
+        vision_model="vision",
+        video_model="video",
+    )
+    cache.record_extraction_result(
+        media_pk="media-1",
+        model_signature=model_sig,
+        source_media_kind="image",
+        result=ExtractionResult(
+            status="event",
+            events=[
+                EventDraft(
+                    title="Club Night",
+                    start=datetime(2026, 5, 3, 20, 0, tzinfo=ZoneInfo("UTC")),
+                ),
+                EventDraft(
+                    title="Day Party",
+                    start=datetime(2026, 5, 4, 14, 0, tzinfo=ZoneInfo("UTC")),
+                ),
+            ],
+            model_ids=["text"],
+            confidence=0.9,
+            warnings=["low resolution"],
+        ),
+        extracted_at=datetime(2026, 4, 26, 12, 0, tzinfo=ZoneInfo("UTC")),
+    )
+    cache.record_extraction_result(
+        media_pk="media-2",
+        model_signature=model_sig,
+        source_media_kind="text",
+        result=ExtractionResult(status="not_event", model_ids=["text"]),
+        extracted_at=datetime(2026, 4, 27, 12, 0, tzinfo=ZoneInfo("UTC")),
+    )
+
+    result = CliRunner().invoke(app, ["cache", "events"])
+
+    assert result.exit_code == 0
+    assert "Media PK" in result.stdout
+    assert "media-1" in result.stdout
+    assert "media-2" in result.stdout
+    assert "Club Night, Day Party" in result.stdout
+    assert "not_event" in result.stdout
 
 
 def test_cli_cache_list_command_is_removed(tmp_path: Path, monkeypatch) -> None:

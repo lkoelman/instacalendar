@@ -122,7 +122,8 @@ Inspect cached posts and processed exports:
 
 ```bash
 uv run instacalendar cache list-posts
-uv run instacalendar cache list-events
+uv run instacalendar cache calendar
+uv run instacalendar cache events
 uv run instacalendar cache info
 ```
 
