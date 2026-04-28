@@ -17,33 +17,25 @@ The app can be installed as a Python package or as a Windows executable bundled 
 ## TLDR
 
 ```bash
-git clone https://github.com/lkoelman/instacalendar.git
-cd instalendar && uv sync
+# install
+uv tool install instacalendar
+# OR: `pip install instacalendar`
 
 # run setup
-uv run instacalendar init
+instacalendar init
 
 # run interactively (fetch Instagram collections and select one)
-uv run instacalendar
+instacalendar
 
 # export specific collection
-uv run instacalendar run --collection "Concerts" --ics-output events.ics
+instacalendar run --collection "Concerts" --ics-output events.ics
 ```
 
 ## Installation
 
 ### Install From PyPI
 
-```bash
-uv tool install instacalendar
-```
-
-Then run:
-
-```bash
-instacalendar init
-instacalendar
-```
+See TLDR section.
 
 ### Install From Source
 
