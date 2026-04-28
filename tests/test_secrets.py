@@ -1,6 +1,17 @@
 from unittest.mock import patch
 
+import keyring
+
 from instacalendar.secrets import SecretStore
+
+
+def test_tests_use_in_memory_keyring_backend():
+    store = SecretStore()
+
+    store.set("roundtrip-key", "secret-value")
+
+    assert keyring.get_keyring().__class__.__name__ == "InMemoryKeyring"
+    assert store.get("roundtrip-key") == "secret-value"
 
 
 def test_secret_store_uses_keyring():

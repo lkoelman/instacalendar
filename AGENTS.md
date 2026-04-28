@@ -107,6 +107,7 @@ Class docstrings should document fields and their intent.
 - [2026-04-26] Optional config additions should preserve non-interactive `auth` flows; add CLI regression coverage before introducing new prompts.
 - [2026-04-26] Configured OpenRouter model IDs such as `openai/gpt-4o-mini` are OpenRouter catalog IDs; LiteLLM calls should prefix them as `openrouter/...` unless they already start with `openrouter/`.
 - [2026-04-26] LiteLLM OpenRouter completion may internally call provider inference on raw catalog IDs like `qwen/...:nitro`; preserve suffixes and coerce providerless slash IDs to OpenRouter at the LiteLLM boundary.
+- [2026-04-28] Pytest installs an in-memory keyring backend in `tests/conftest.py`; keep tests using keyring APIs without relying on CI OS keyring availability or plaintext secret fallbacks.
 
 ## Memory Management
 
