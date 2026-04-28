@@ -12,7 +12,7 @@ collection, asks OpenRouter models through LiteLLM to infer calendar events,
 lets you review each candidate event, and exports approved events to `.ics` or
 Google Calendar.
 
-The app can be installed as Python package or as a Windows executable bundled with PyInstaller.
+The app can be installed as a Python package or as a Windows executable bundled with PyInstaller.
 
 ## TLDR
 
@@ -32,9 +32,24 @@ uv run instacalendar run --collection "Concerts" --ics-output events.ics
 
 ## Installation
 
+### Install From PyPI
+
+```bash
+uv tool install instacalendar
+```
+
+Then run:
+
+```bash
+instacalendar init
+instacalendar
+```
+
 ### Install From Source
 
 ```bash
+git clone https://github.com/lkoelman/instacalendar.git
+cd instacalendar
 uv sync --dev
 ```
 

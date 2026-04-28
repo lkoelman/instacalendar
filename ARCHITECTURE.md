@@ -271,6 +271,7 @@ GitHub Actions provides:
 
 - Ubuntu CI on push and pull request: `uv sync --dev`, `uv run ruff check`, and `uv run pytest`.
 - Windows executable build on tags matching `v*` or manual dispatch: `uv sync --dev`, PyInstaller one-file build, and artifact upload as `instacalendar.exe`.
+- PyPI publishing on tags matching `v*.*.*`: build and validate source/wheel distributions, then publish through PyPI Trusted Publishing with GitHub OIDC and the `pypi` GitHub environment.
 
 There is no hosted backend, database server, container image, serverless deployment, or cloud infrastructure managed by this repository.
 

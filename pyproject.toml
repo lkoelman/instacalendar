@@ -1,12 +1,21 @@
 [project]
 name = "instacalendar"
 version = "0.1.0"
-description = "Add your description here"
+description = "Sync Instagram saved event posts to calendar exports."
 readme = "README.md"
 authors = [
     { name = "Lucas Koelman", email = "lucas.koelman@gmail.com" }
 ]
 requires-python = ">=3.12"
+keywords = ["calendar", "instagram", "ics", "openrouter", "cli"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Scheduling",
+]
 dependencies = [
     "google-api-python-client>=2.179.0",
     "google-auth-oauthlib>=1.2.1",
@@ -26,6 +35,11 @@ dependencies = [
 
 [project.scripts]
 instacalendar = "instacalendar.cli:app"
+
+[project.urls]
+Homepage = "https://github.com/lkoelman/instacalendar"
+Repository = "https://github.com/lkoelman/instacalendar"
+Issues = "https://github.com/lkoelman/instacalendar/issues"
 
 [dependency-groups]
 dev = [
