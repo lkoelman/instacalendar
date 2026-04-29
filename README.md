@@ -4,6 +4,13 @@
 
 <h1 align="center">Instacalendar</h1>
 
+<p align="center">
+  <img alt="GitHub Repo stars" src="https://img.shields.io/github/stars/lkoelman/instacalendar">
+  <img alt="GitHub forks" src="https://img.shields.io/github/forks/lkoelman/instacalendar">
+  <img alt="GitHub Issues or Pull Requests" src="https://img.shields.io/github/issues/lkoelman/instacalendar">
+  <a href="https://github.com/lkoelman/instacalendar/actions"><img alt="CI Status" src="https://github.com/lkoelman/instacalendar/actions/workflows/ci.yml/badge.svg" /></a>
+  <img alt="PyPI package version" src="https://img.shields.io/pypi/v/instacalendar" />
+</p>
 
 > Scenario: you're like me and save lots of gigs and events in Instagram. Then you forget about them. Life's busy and it's hard to keep track of all those fun events without aligning them with your boring, grown-up calendar. Meet Instacalendar: seamlessly sync an entire Instragram saved post collection to your Google (or other) calendar. Keep track of those events, plan better, go out and explore!
 
