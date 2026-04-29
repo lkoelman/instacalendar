@@ -14,10 +14,7 @@
 
 > Scenario: you're like me and save lots of gigs and events in Instagram. Then you forget about them. Life's busy and it's hard to keep track of all those fun events without aligning them with your boring, grown-up calendar. Meet Instacalendar: seamlessly sync an entire Instragram saved post collection to your Google (or other) calendar. Keep track of those events, plan better, go out and explore!
 
-`instacalendar` is a command-line wizard that reads an Instagram saved posts
-collection, asks OpenRouter models through LiteLLM to infer calendar events,
-lets you review each candidate event, and exports approved events to `.ics` or
-Google Calendar.
+`instacalendar` is a command-line app that lets you export an Instagram saved posts collection to calendar events. It uses visual language models to extract event details from Instagram posts, including images and videos, and supports exporting to .ics files or directly to Google Calendar.
 
 The app can be installed as a Python package or as a Windows executable bundled with PyInstaller.
 
